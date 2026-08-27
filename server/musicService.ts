@@ -1,6 +1,33 @@
 import { Song, LyricLine } from '../src/types';
 
-// Clean artist names: remove kana readings, furigana, or extraneous translations
+// Random Chinese IP pool to bypass overseas VPS datacenter geo-blocking
+const CHINESE_IPS = [
+  '118.89.204.198',
+  '117.136.8.134',
+  '223.252.199.66',
+  '123.125.114.144',
+  '183.232.231.172',
+  '220.181.38.148',
+  '120.232.145.185',
+  '36.110.213.205',
+];
+
+function getRandomChineseIP(): string {
+  return CHINESE_IPS[Math.floor(Math.random() * CHINESE_IPS.length)];
+}
+
+function getCommonHeaders(referer: string): Record<string, string> {
+  const ip = getRandomChineseIP();
+  return {
+    'Referer': referer,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'X-Real-IP': ip,
+    'X-Forwarded-For': `${ip}, ${getRandomChineseIP()}`,
+    'Client-IP': ip,
+    'X-Client-IP': ip,
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  };
+}
 function cleanArtist(name: string): string {
   if (!name) return '';
   let cleaned = name
@@ -317,20 +344,22 @@ const POPULAR_SONG_DB: Array<{
   }
 ];
 
-// NetEase Cloud Music Search (Real NetEase CloudSearch API)
+// NetEase Cloud Music Search (with multiple endpoint fallbacks & geo-spoofing)
 export async function searchNetease(keyword: string): Promise<Song[]> {
+  const commonHeaders = getCommonHeaders('https://music.163.com/');
+  const songs: Song[] = [];
+
+  // Strategy 1: Real NetEase cloudsearch/pc API
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-    // Primary: NetEase cloudsearch API (returns 100% genuine song lists, albums, artists, picUrls)
-    const url = `https://music.163.com/api/cloudsearch/pc?s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=25`;
+    const url = `https://music.163.com/api/cloudsearch/pc?s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=30`;
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'Referer': 'https://music.163.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Cookie': 'os=pc;',
+        ...commonHeaders,
+        'Cookie': 'os=pc; osver=Microsoft-Windows-10-Professional-build-19042-64bit; appver=2.9.7; NMTID=00O' + Math.random().toString(36).substring(2),
       },
     });
     clearTimeout(timeoutId);
@@ -339,7 +368,7 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
       const data = await res.json();
       const songList = data?.result?.songs;
       if (Array.isArray(songList) && songList.length > 0) {
-        return songList.map((s: any) => {
+        for (const s of songList) {
           const rawArtistName =
             s.ar?.map((a: any) => a.name).join('/') ||
             s.artists?.map((a: any) => a.name).join('/') ||
@@ -349,7 +378,6 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
           let albumPic = s.al?.picUrl || s.album?.picUrl || '';
           if (albumPic) {
             albumPic = albumPic.replace('http:', 'https:');
-            // ensure high quality square thumbnail
             if (!albumPic.includes('?param=')) {
               albumPic += '?param=500y500';
             }
@@ -357,24 +385,76 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
             albumPic = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80';
           }
 
-          return {
+          songs.push({
             id: String(s.id),
-            platform: 'netease' as const,
+            platform: 'netease',
             name: s.name || keyword,
             artist: artistName,
             album: albumName,
             albumCover: albumPic,
             duration: Math.round((s.dt || s.duration || 210000) / 1000),
             url: `https://music.163.com/#/song?id=${s.id}`,
-          };
-        });
+          });
+        }
+        return songs;
       }
     }
   } catch (err) {
-    console.warn('NetEase real-time search error:', err);
+    console.warn('NetEase cloudsearch error:', err);
   }
 
-  // If real search returns empty or fails, check real static catalog, do not generate fake songs
+  // Strategy 2: NetEase search/get/web fallback
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const url = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=30&total=true`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        ...commonHeaders,
+        'Cookie': 'os=pc; appver=2.9.7;',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const songList = data?.result?.songs;
+      if (Array.isArray(songList) && songList.length > 0) {
+        for (const s of songList) {
+          const rawArtistName = s.artists?.map((a: any) => a.name).join('/') || '未知歌手';
+          const artistName = cleanArtist(rawArtistName);
+          const albumName = s.album?.name || '单曲';
+          let albumPic = s.album?.picUrl || '';
+          if (albumPic) {
+            albumPic = albumPic.replace('http:', 'https:');
+            if (!albumPic.includes('?param=')) {
+              albumPic += '?param=500y500';
+            }
+          } else {
+            albumPic = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80';
+          }
+
+          songs.push({
+            id: String(s.id),
+            platform: 'netease',
+            name: s.name || keyword,
+            artist: artistName,
+            album: albumName,
+            albumCover: albumPic,
+            duration: Math.round((s.duration || 210000) / 1000),
+            url: `https://music.163.com/#/song?id=${s.id}`,
+          });
+        }
+        return songs;
+      }
+    }
+  } catch (err) {
+    console.warn('NetEase search/get/web error:', err);
+  }
+
+  // Strategy 3: Check static library
   const kw = keyword.toLowerCase().trim();
   const matched = POPULAR_SONG_DB.filter(
     (s) =>
@@ -396,19 +476,20 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
   }));
 }
 
-// QQ Music Search
+// QQ Music Search (with multiple endpoint fallbacks & geo-spoofing)
 export async function searchQQ(keyword: string): Promise<Song[]> {
+  const commonHeaders = getCommonHeaders('https://y.qq.com/');
+  const songs: Song[] = [];
+
+  // Strategy 1: QQ Music client_search_cp API (JSON format)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-    const url = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=25&w=${encodeURIComponent(keyword)}&format=json&t=0`;
+    const url = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=30&w=${encodeURIComponent(keyword)}&format=json&t=0&cr=1`;
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        'Referer': 'https://y.qq.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      },
+      headers: commonHeaders,
     });
     clearTimeout(timeoutId);
 
@@ -416,7 +497,7 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
       const data = await res.json();
       const songList = data?.data?.song?.list;
       if (Array.isArray(songList) && songList.length > 0) {
-        return songList.map((s: any) => {
+        for (const s of songList) {
           const rawArtistName = s.singer?.map((sg: any) => sg.name).join('/') || '未知歌手';
           const artistName = cleanArtist(rawArtistName);
           const albumName = s.albumname || '单曲';
@@ -425,26 +506,112 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
             ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
             : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
 
-          return {
+          songs.push({
             id: String(s.songid || s.songmid),
             songMid: s.songmid,
             albumMid: s.albummid,
-            platform: 'qq' as const,
+            platform: 'qq',
             name: s.songname || keyword,
             artist: artistName,
             album: albumName,
             albumCover: albumPic,
             duration: s.interval || 220,
             url: `https://y.qq.com/n/ryqq/songDetail/${s.songmid || s.songid}`,
-          };
-        });
+          });
+        }
+        return songs;
       }
     }
   } catch (err) {
-    console.warn('QQ Music real-time search error:', err);
+    console.warn('QQ Music JSON search error:', err);
   }
 
-  // If real search returns empty or fails, check real static catalog, do not generate fake songs
+  // Strategy 2: QQ Music client_search_cp API (JSONP format parsing)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const url = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=30&w=${encodeURIComponent(keyword)}&format=jsonp&jsonpCallback=callback&t=0`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: commonHeaders,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const text = await res.text();
+      const match = text.match(/^callback\((.*)\)$/s) || text.match(/\((.*)\)/s);
+      if (match) {
+        const data = JSON.parse(match[1]);
+        const songList = data?.data?.song?.list;
+        if (Array.isArray(songList) && songList.length > 0) {
+          for (const s of songList) {
+            const rawArtistName = s.singer?.map((sg: any) => sg.name).join('/') || '未知歌手';
+            const artistName = cleanArtist(rawArtistName);
+            const albumName = s.albumname || '单曲';
+            const albumMid = s.albummid || '';
+            const albumPic = albumMid
+              ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
+              : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
+
+            songs.push({
+              id: String(s.songid || s.songmid),
+              songMid: s.songmid,
+              albumMid: s.albummid,
+              platform: 'qq',
+              name: s.songname || keyword,
+              artist: artistName,
+              album: albumName,
+              albumCover: albumPic,
+              duration: s.interval || 220,
+              url: `https://y.qq.com/n/ryqq/songDetail/${s.songmid || s.songid}`,
+            });
+          }
+          return songs;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('QQ Music JSONP search error:', err);
+  }
+
+  // Strategy 3: QQ Smartbox Search
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const url = `https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?key=${encodeURIComponent(keyword)}&format=json`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: commonHeaders,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const songItems = data?.data?.song?.itemlist;
+      if (Array.isArray(songItems) && songItems.length > 0) {
+        for (const s of songItems) {
+          songs.push({
+            id: String(s.id || s.mid),
+            songMid: s.mid,
+            platform: 'qq',
+            name: s.name || keyword,
+            artist: cleanArtist(s.singer || '未知歌手'),
+            album: '精选单曲',
+            albumCover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
+            duration: 240,
+            url: `https://y.qq.com/n/ryqq/songDetail/${s.mid || s.id}`,
+          });
+        }
+        return songs;
+      }
+    }
+  } catch (err) {
+    console.warn('QQ Smartbox search error:', err);
+  }
+
+  // Strategy 4: Check static library
   const kw = keyword.toLowerCase().trim();
   const matched = POPULAR_SONG_DB.filter(
     (s) =>
@@ -472,26 +639,23 @@ export async function getNeteaseDetail(id: string): Promise<{ lyrics: LyricLine[
   let rawLyric = '';
   let rawTLyric = '';
   let albumCover = '';
+  const commonHeaders = getCommonHeaders('https://music.163.com/');
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
     const [lyricRes, detailRes] = await Promise.allSettled([
       fetch(`https://music.163.com/api/song/lyric?os=pc&id=${id}&lv=-1&kv=-1&tv=-1`, {
         signal: controller.signal,
         headers: {
-          'Referer': 'https://music.163.com/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Cookie': 'os=pc;',
+          ...commonHeaders,
+          'Cookie': 'os=pc; appver=2.9.7;',
         },
       }),
       fetch(`https://music.163.com/api/song/detail/?id=${id}&ids=[${id}]`, {
         signal: controller.signal,
-        headers: {
-          'Referer': 'https://music.163.com/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
+        headers: commonHeaders,
       }),
     ]);
 
@@ -513,7 +677,28 @@ export async function getNeteaseDetail(id: string): Promise<{ lyrics: LyricLine[
     console.warn('NetEase lyric fetch failed:', err);
   }
 
-  // If no rawLyric returned from API, check our smart library
+  // Strategy 2: Fallback to OSX lyric endpoint if lyric still empty
+  if (!rawLyric) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`https://music.163.com/api/song/lyric?os=osx&id=${id}&lv=-1&kv=-1&tv=-1`, {
+        signal: controller.signal,
+        headers: {
+          ...commonHeaders,
+          'Cookie': 'os=osx;',
+        },
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        rawLyric = data?.lrc?.lyric || '';
+        rawTLyric = data?.tlyric?.lyric || '';
+      }
+    } catch (e) {}
+  }
+
+  // Strategy 3: If no rawLyric returned from API, check our smart library
   if (!rawLyric) {
     const fallback = findFallbackByIdOrKeyword(id);
     if (fallback) {
@@ -533,6 +718,7 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
   let rawTLyric = '';
   let albumCover = '';
   const targetMid = songMid || id;
+  const commonHeaders = getCommonHeaders('https://y.qq.com/');
 
   try {
     const controller = new AbortController();
@@ -557,8 +743,7 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
       method: 'POST',
       signal: controller.signal,
       headers: {
-        'Referer': 'https://y.qq.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        ...commonHeaders,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(postData),
@@ -600,10 +785,7 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
         `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(targetMid)}&format=json&nobase64=1`,
         {
           signal: controller.signal,
-          headers: {
-            'Referer': 'https://y.qq.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
+          headers: commonHeaders,
         }
       );
 

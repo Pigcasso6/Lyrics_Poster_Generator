@@ -3,6 +3,7 @@ import { SearchBar } from './components/SearchBar';
 import { SongList } from './components/SongList';
 import { LyricsModal } from './components/LyricsModal';
 import { Song, PlatformType, SearchResponse } from './types';
+import { searchMusic } from './services/api';
 
 export default function App() {
   const [keyword, setKeyword] = useState('');
@@ -23,14 +24,13 @@ export default function App() {
     setHasSearched(true);
 
     try {
-      const res = await fetch(`/api/music/search?keyword=${encodeURIComponent(query)}`);
-      if (!res.ok) throw new Error('Search failed');
-
-      const data: SearchResponse = await res.json();
+      const data: SearchResponse = await searchMusic(query);
       setNeteaseResults(data.netease || []);
       setQqResults(data.qq || []);
     } catch (err) {
       console.error('Search request error:', err);
+      setNeteaseResults([]);
+      setQqResults([]);
     } finally {
       setLoading(false);
     }

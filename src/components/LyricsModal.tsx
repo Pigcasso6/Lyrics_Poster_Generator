@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
 import { Song, LyricLine, SongDetailResponse, PosterConfig, PosterTheme, PosterFont } from '../types';
+import { fetchSongDetail } from '../services/api';
 import { PosterPreview } from './PosterPreview';
 import { TypographyModal } from './TypographyModal';
 import { LyricPickerModal } from './LyricPickerModal';
@@ -139,20 +140,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
     const fetchLyrics = async () => {
       try {
-        const params = new URLSearchParams({
-          platform: song.platform,
-          id: song.id,
-          name: song.name,
-          artist: song.artist,
-          album: song.album,
-          albumCover: song.albumCover,
-        });
-        if (song.songMid) params.append('songMid', song.songMid);
-
-        const res = await fetch(`/api/music/lyrics?${params.toString()}`);
-        if (!res.ok) throw new Error('Fetch lyrics failed');
-        const data: SongDetailResponse = await res.json();
-
+        const data = await fetchSongDetail(song);
         if (isMounted) {
           setDetailData(data);
           if (data.song?.albumCover && data.song.albumCover !== song.albumCover) {
