@@ -1,0 +1,6 @@
+{
+  "name": "歌词海报生成器",
+  "description": "支持从网易云音乐与QQ音乐检索歌曲，查看完整高清专辑封面与歌词，选择喜爱金句一键生成精美歌词海报与分享卡片。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
