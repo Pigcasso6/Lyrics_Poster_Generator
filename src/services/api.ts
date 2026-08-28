@@ -424,11 +424,54 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
     } catch (e) {}
   }
 
-  // Strategy 2: Meting Search & Lyric Retrieval
+  // Strategy 2: Direct lyric API by NetEase ID across multiple CORS mirrors
+  const numericId = song.id.replace(/[^\d]/g, '');
+  if (numericId) {
+    const directLyricMirrors = [
+      `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
+      `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
+      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`,
+    ];
+
+    for (const mirrorUrl of directLyricMirrors) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(mirrorUrl, { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          let lrc = '';
+          let tlrc = '';
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            lrc = data.lyric || data.lrc || '';
+            tlrc = data.tlyric || data.tlrc || '';
+          } else {
+            lrc = await res.text();
+          }
+
+          if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败') && !lrc.includes('非法调用')) {
+            const parsed = parseLrc(lrc, tlrc);
+            if (parsed.length > 0) {
+              return {
+                lyrics: parsed,
+                rawLyric: lrc,
+                rawTLyric: tlrc,
+                albumCover: song.albumCover,
+              };
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Strategy 3: Meting Search & Lyric Retrieval by song title + artist
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
-    const searchKw = song.name || song.id;
+    const searchKw = `${song.name} ${song.artist}`.trim() || song.name || song.id;
     const url = `https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(searchKw)}`;
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
@@ -457,7 +500,38 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
     }
   } catch (e) {}
 
-  // Strategy 3: Local popular song fallback
+  // Strategy 4: GDStudio Search & Lyric Retrieval by song title
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const gdUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=5&source=netease&name=${encodeURIComponent(song.name)}`;
+    const res = await fetch(gdUrl, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        const item = list[0];
+        if (item.id || item.url_id) {
+          const lyricId = item.id || item.url_id;
+          const lyrRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${lyricId}&source=netease`);
+          if (lyrRes.ok) {
+            const lyrData = await lyrRes.json();
+            if (lyrData?.lyric && lyrData.lyric.includes('[')) {
+              return {
+                lyrics: parseLrc(lyrData.lyric, lyrData.tlyric),
+                rawLyric: lyrData.lyric,
+                rawTLyric: lyrData.tlyric,
+                albumCover: song.albumCover,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // Strategy 5: Local popular song fallback
   const fallback = FALLBACK_POPULAR_SONGS.find(
     (s) =>
       (song.name && s.name.toLowerCase().includes(song.name.toLowerCase())) ||
@@ -511,8 +585,51 @@ async function clientSearchQQ(keyword: string): Promise<Song[]> {
   return [];
 }
 
-// Client-side Direct QQ Lyric via JSONP
+// Client-side Direct QQ Lyric with multiple failover providers
 async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string }> {
+  // Strategy 1: Meting & CORS lyric mirrors by QQ songMid/id
+  const targetId = songMid || '';
+  if (targetId) {
+    const qqMirrors = [
+      `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
+      `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
+      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetId)}&source=tencent`,
+    ];
+
+    for (const mirrorUrl of qqMirrors) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(mirrorUrl, { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          let lrc = '';
+          let tlrc = '';
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            lrc = data.lyric || data.lrc || '';
+            tlrc = data.tlyric || data.tlrc || '';
+          } else {
+            lrc = await res.text();
+          }
+
+          if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败')) {
+            const parsed = parseLrc(lrc, tlrc);
+            if (parsed.length > 0) {
+              return {
+                lyrics: parsed,
+                rawLyric: lrc,
+                rawTLyric: tlrc,
+              };
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Strategy 2: Client JSONP from QQ Music
   try {
     const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songMid)}&format=jsonp&nobase64=1`;
     const data: any = await browserJsonp(url, 'jsonpCallback');
@@ -550,7 +667,7 @@ async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<
     console.warn('Client JSONP QQ lyric fetch failed:', err);
   }
 
-  // Fallback to local DB
+  // Strategy 3: Fallback to local DB
   const fallback = FALLBACK_POPULAR_SONGS.find(
     (s) =>
       (songName && s.name.toLowerCase().includes(songName.toLowerCase())) ||

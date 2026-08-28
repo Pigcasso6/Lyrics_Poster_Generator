@@ -831,7 +831,44 @@ export async function getNeteaseDetail(id: string, songName?: string, lrcUrl?: s
     } catch (e) {}
   }
 
-  // Strategy 3: Meting search & lyric mirror fallback by song ID / name
+  // Strategy 3: Direct Meting / GDStudio lyric mirror fallback by song ID / name
+  if (!rawLyric) {
+    const numericId = id.replace(/[^\d]/g, '');
+    if (numericId) {
+      const mirrors = [
+        `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
+        `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
+        `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`,
+      ];
+      for (const mirrorUrl of mirrors) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(mirrorUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            let lrc = '';
+            let tlrc = '';
+            if (contentType.includes('application/json')) {
+              const data = await res.json();
+              lrc = data.lyric || data.lrc || '';
+              tlrc = data.tlyric || data.tlrc || '';
+            } else {
+              lrc = await res.text();
+            }
+            if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败') && !lrc.includes('非法调用')) {
+              rawLyric = lrc;
+              rawTLyric = tlrc;
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  // Strategy 4: Meting search fallback
   if (!rawLyric) {
     try {
       const controller = new AbortController();
@@ -989,6 +1026,40 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
       }
     } catch (err) {
       console.warn('QQ fallback lyric fetch failed:', err);
+    }
+  }
+
+  // Strategy 3: Meting & GDStudio direct lyric mirror for QQ
+  if (!rawLyric && targetMid) {
+    const qqMirrors = [
+      `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
+      `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
+      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetMid)}&source=tencent`,
+    ];
+    for (const mirrorUrl of qqMirrors) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(mirrorUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          let lrc = '';
+          let tlrc = '';
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            lrc = data.lyric || data.lrc || '';
+            tlrc = data.tlyric || data.tlrc || '';
+          } else {
+            lrc = await res.text();
+          }
+          if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败')) {
+            rawLyric = lrc;
+            rawTLyric = tlrc;
+            break;
+          }
+        }
+      } catch (e) {}
     }
   }
 
