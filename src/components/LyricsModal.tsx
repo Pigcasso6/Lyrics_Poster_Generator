@@ -104,24 +104,46 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [previewScale, setPreviewScale] = useState(1);
 
-  // Load and cache high-res image as base64 via proxy to guarantee CORS-safe canvas export
+  // Load and cache high-res image as base64 via multi-layer proxy to guarantee CORS-safe canvas export
   const loadBase64Cover = async (coverUrl: string) => {
     if (!coverUrl) return;
+    
+    // Set immediate direct cover first so preview renders instantly
+    setBase64Cover(coverUrl);
+
+    // Strategy 1: Local Backend Image Proxy
     try {
       const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(coverUrl)}`;
       const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error('Proxy fetch failed');
-      const blob = await res.blob();
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setBase64Cover(reader.result);
-        }
-      };
-      reader.readAsDataURL(blob);
-    } catch {
-      setBase64Cover(coverUrl);
-    }
+      if (res.ok) {
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setBase64Cover(reader.result);
+          }
+        };
+        reader.readAsDataURL(blob);
+        return;
+      }
+    } catch {}
+
+    // Strategy 2: Global CORS Image CDN Proxy (wsrv.nl) - Works seamlessly on static custom domain deployments!
+    try {
+      const wsrvUrl = `https://wsrv.nl/?url=${encodeURIComponent(coverUrl)}&output=webp`;
+      const res = await fetch(wsrvUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setBase64Cover(reader.result);
+          }
+        };
+        reader.readAsDataURL(blob);
+        return;
+      }
+    } catch {}
   };
 
   // Fetch song details & lyrics
@@ -421,9 +443,12 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
             <div className="min-w-0 flex-1">
               <h2 className="text-xs sm:text-sm font-bold text-white truncate">{song.name}</h2>
               <div className="text-[10px] sm:text-[11px] text-slate-400 flex items-center overflow-hidden">
-                <span className="shrink-0 max-w-[80%] sm:max-w-[85%] truncate">{cleanArtistName(song.artist)}</span>
+                <span className="shrink-0 max-w-[50%] sm:max-w-[60%] truncate">{cleanArtistName(song.artist)}</span>
                 {song.album && (
-                  <span className="truncate shrink min-w-0"> · {cleanAlbumName(song.album)}</span>
+                  <>
+                    <span className="shrink-0 mx-1.5 text-slate-500 select-none">·</span>
+                    <span className="truncate shrink min-w-0">{cleanAlbumName(song.album)}</span>
+                  </>
                 )}
               </div>
             </div>
@@ -1449,10 +1474,15 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
             <div className="text-center space-y-0.5">
               <h3 className="text-sm font-bold text-white">{song.name}</h3>
-              <p className="text-xs text-slate-400">
-                {cleanArtistName(song.artist)}
-                {song.album && ` · ${cleanAlbumName(song.album)}`}
-              </p>
+              <div className="flex items-center justify-center text-xs text-slate-400 overflow-hidden">
+                <span className="truncate max-w-[45%]">{cleanArtistName(song.artist)}</span>
+                {song.album && (
+                  <>
+                    <span className="shrink-0 mx-1.5 opacity-60 select-none">·</span>
+                    <span className="truncate max-w-[45%]">{cleanAlbumName(song.album)}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

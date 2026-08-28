@@ -83,7 +83,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           type="text"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          placeholder="搜索歌曲、歌手、专辑"
+          placeholder="搜索歌曲、歌手、专辑…"
           className="w-full py-3.5 sm:py-4 pl-3 pr-10 text-slate-800 placeholder-slate-400 bg-transparent text-base sm:text-lg outline-none font-medium"
         />
 

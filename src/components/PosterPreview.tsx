@@ -126,8 +126,14 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               src={coverImageSrc}
               alt={cleanSongName}
               referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
               className="w-full h-full object-cover block"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (!target.dataset.fallbackApplied) {
+                  target.dataset.fallbackApplied = 'true';
+                  target.src = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
+                }
+              }}
             />
           </div>
         </div>
@@ -241,9 +247,12 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
                 : 'justify-start'
             }`}
           >
-            <span className="shrink-0 max-w-[85%] truncate">{cleanArtist}</span>
+            <span className="shrink-0 max-w-[50%] sm:max-w-[60%] truncate">{cleanArtist}</span>
             {config.showAlbumInfo && song.album && (
-              <span className="truncate shrink min-w-0"> · {cleanAlbum}</span>
+              <>
+                <span className="shrink-0 mx-1.5 opacity-60 select-none">·</span>
+                <span className="truncate shrink min-w-0">{cleanAlbum}</span>
+              </>
             )}
           </div>
         </div>
