@@ -95,10 +95,8 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   let coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
   if (rawCoverSrc) {
-    if (rawCoverSrc.startsWith('data:') || rawCoverSrc.startsWith('blob:') || rawCoverSrc.startsWith('data:image/svg+xml')) {
-      coverImageSrc = rawCoverSrc;
-    } else if (rawCoverSrc.startsWith('http://') || rawCoverSrc.startsWith('https://')) {
-      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCoverSrc)}`;
+    if (rawCoverSrc.startsWith('http://')) {
+      coverImageSrc = rawCoverSrc.replace(/^http:\/\//i, 'https://');
     } else {
       coverImageSrc = rawCoverSrc;
     }

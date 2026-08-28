@@ -13,9 +13,10 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onSelect, isSelected }
   const [imgError, setImgError] = useState(false);
 
   // Fallback vinyl image if cover fails
-  const coverSrc = imgError || !song.albumCover
+  const rawCover = song.albumCover ? song.albumCover.replace(/^http:\/\//i, 'https://') : '';
+  const coverSrc = imgError || !rawCover
     ? generateVinylCoverSvg(song.name, song.artist)
-    : song.albumCover;
+    : rawCover;
 
   return (
     <div

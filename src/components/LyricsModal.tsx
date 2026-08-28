@@ -251,6 +251,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
           pixelRatio: ratio,
           cacheBust: false,
           skipFonts: true,
+          imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
           width,
           height,
           canvasWidth: width * ratio,
