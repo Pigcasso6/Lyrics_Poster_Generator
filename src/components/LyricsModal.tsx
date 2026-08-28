@@ -29,6 +29,7 @@ import { ExportScaleModal } from './ExportScaleModal';
 import { MobilePosterResultModal } from './MobilePosterResultModal';
 import { cleanAlbumName, cleanArtistName } from '../utils/cleanTitle';
 import { urlToBase64 } from '../utils/image';
+import { generateVinylCoverSvg } from '../utils/cover';
 
 interface LyricsModalProps {
   song: Song | null;
@@ -229,53 +230,92 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setSelectedLines([]);
   };
 
+  const [exportCoverDataUrl, setExportCoverDataUrl] = useState<string | null>(null);
+
   // Helper to generate clean image with customizable sampling multiplier (2x to 8x)
   const generatePosterImage = async (targetPixelRatio = 4) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
-    const width = node.offsetWidth;
-    const height = node.offsetHeight;
-
-    const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
-
-    // Try target down through progressive fallback levels
-    const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
-      (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
-    );
-
-    for (const ratio of ratiosToTry) {
+    // Pre-fetch real cover as Base64 Data URL to guarantee cross-origin security during toPng
+    if (song?.albumCover && !song.albumCover.startsWith('data:')) {
       try {
-        const dataUrl = await toPng(node, {
-          quality: 0.98,
-          pixelRatio: ratio,
-          cacheBust: false,
-          skipFonts: true,
-          imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
-          width,
-          height,
-          canvasWidth: width * ratio,
-          canvasHeight: height * ratio,
-          style: {
-            margin: '0',
-            transform: 'none',
-            left: '0',
-            top: '0',
-            position: 'static',
-          },
-        });
-        if (dataUrl) return dataUrl;
-      } catch (e) {
-        console.warn(`Export attempt with pixelRatio=${ratio} failed, trying next resolution level...`, e);
+        const cleanUrl = song.albumCover.replace(/^http:\/\//i, 'https://');
+        const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
+        
+        const res = await fetch(proxyUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          const blob = await res.blob();
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          if (b64 && b64.startsWith('data:image')) {
+            setExportCoverDataUrl(b64);
+            // Give React DOM time to update <img> src to b64
+            await new Promise((resolve) => setTimeout(resolve, 80));
+          }
+        }
+      } catch (err) {
+        console.warn('Pre-fetch cover for export warning:', err);
       }
     }
-    throw new Error('Failed to generate image across all resolution attempts');
+
+    try {
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+
+      const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
+
+      // Try target down through progressive fallback levels
+      const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
+        (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
+      );
+
+      for (const ratio of ratiosToTry) {
+        try {
+          const dataUrl = await toPng(node, {
+            quality: 0.98,
+            pixelRatio: ratio,
+            cacheBust: false,
+            skipFonts: true,
+            imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
+            width,
+            height,
+            canvasWidth: width * ratio,
+            canvasHeight: height * ratio,
+            style: {
+              margin: '0',
+              transform: 'none',
+              left: '0',
+              top: '0',
+              position: 'static',
+            },
+          });
+          if (dataUrl) return dataUrl;
+        } catch (e) {
+          console.warn(`Export attempt with pixelRatio=${ratio} failed, trying next resolution level...`, e);
+        }
+      }
+      throw new Error('Failed to generate image across all resolution attempts');
+    } finally {
+      setExportCoverDataUrl(null);
+    }
   };
 
   // Export Poster as PNG image
   const handleDownloadPoster = async (scaleRatio?: number) => {
     if (!posterRef.current) return;
     setIsExporting(true);
+    
+    // Give React time to re-render the DOM with isExporting=true (switching to safe fallback image)
+    await new Promise((resolve) => setTimeout(resolve, 60));
 
     try {
       const targetRatio = scaleRatio || Number(exportScale) || 4;
@@ -341,44 +381,26 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const handleCopyImage = async (scaleRatio?: number) => {
     if (!posterRef.current) return;
     setIsExporting(true);
+    
+    // Give React time to re-render the DOM with isExporting=true (switching to safe fallback image)
+    await new Promise((resolve) => setTimeout(resolve, 60));
 
     try {
-      const node = posterRef.current;
       const targetRatio = scaleRatio || Number(exportScale) || 4;
       const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+
+      const dataUrl = await generatePosterImage(targetRatio);
 
       // On mobile devices, clipboard write for PNG images is restricted by WebKit/Blink security policies
       // We directly provide the high-def result modal for seamless saving/sharing!
       if (isMobile) {
-        const dataUrl = await generatePosterImage(targetRatio);
         setExportModalType(null);
         setExportedResultDataUrl(dataUrl);
         return;
       }
 
-      const width = node.offsetWidth;
-      const height = node.offsetHeight;
-
-      let blob: Blob | null = null;
-      const ratiosToTry = [targetRatio, 6, 4, 3, 2].filter(
-        (r, idx, arr) => arr.indexOf(r) === idx && r <= targetRatio
-      );
-      for (const ratio of ratiosToTry) {
-        try {
-          blob = await toBlob(node, {
-            pixelRatio: ratio,
-            cacheBust: false,
-            skipFonts: true,
-            width,
-            height,
-            canvasWidth: width * ratio,
-            canvasHeight: height * ratio,
-          });
-          if (blob) break;
-        } catch (e) {
-          console.warn(`Copy blob with ratio=${ratio} failed, trying lower ratio...`, e);
-        }
-      }
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
 
       if (!blob) throw new Error('Blob generation failed');
 
@@ -607,7 +629,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={song.albumCover}
+              customCoverUrl={exportCoverDataUrl || (isExporting ? generateVinylCoverSvg(song.name, song.artist) : song.albumCover)}
             />
           </div>
         </div>

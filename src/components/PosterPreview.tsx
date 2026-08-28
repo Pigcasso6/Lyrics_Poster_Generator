@@ -88,22 +88,21 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
     }
   };
 
+  const [imgError, setImgError] = React.useState(false);
+
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
   const cleanAlbum = cleanAlbumName(song.album);
-  const rawCoverSrc = customCoverUrl || song.albumCover;
+  
+  const rawCover = (customCoverUrl || song.albumCover || '').replace(/^http:\/\//i, 'https://');
 
-  let coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
-  if (rawCoverSrc) {
-    if (rawCoverSrc.startsWith('data:') || rawCoverSrc.startsWith('blob:')) {
-      coverImageSrc = rawCoverSrc;
-    } else if (rawCoverSrc.startsWith('http://') || rawCoverSrc.startsWith('https://')) {
-      const cleanUrl = rawCoverSrc.replace(/^http:\/\//i, 'https://');
-      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
-    } else {
-      coverImageSrc = rawCoverSrc;
-    }
-  }
+  React.useEffect(() => {
+    setImgError(false);
+  }, [rawCover]);
+
+  const coverImageSrc = imgError || !rawCover
+    ? generateVinylCoverSvg(cleanSongName, cleanArtist)
+    : rawCover;
 
   return (
     <div
@@ -144,15 +143,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               alt={cleanSongName}
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover block"
-              onError={(e) => {
-                const target = e.currentTarget;
-                const directUrl = rawCoverSrc ? rawCoverSrc.replace(/^http:\/\//i, 'https://') : '';
-                if (directUrl && target.src !== directUrl) {
-                  target.src = directUrl;
-                } else {
-                  target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
-                }
-              }}
+              onError={() => setImgError(true)}
             />
           </div>
         </div>
