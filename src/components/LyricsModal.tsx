@@ -129,29 +129,12 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setLoading(true);
     setSelectedLines([]);
     setCustomQuoteInput('');
-    setCoverDataUrl('');
-
-    // Pre-convert album artwork into Base64 data URL
-    if (song.albumCover) {
-      urlToBase64(song.albumCover).then((b64) => {
-        if (isMounted && b64) {
-          setCoverDataUrl(b64);
-        }
-      });
-    }
 
     const fetchLyrics = async () => {
       try {
         const data = await fetchSongDetail(song);
         if (isMounted) {
           setDetailData(data);
-          if (data.song?.albumCover && !coverDataUrl) {
-            urlToBase64(data.song.albumCover).then((b64) => {
-              if (isMounted && b64) {
-                setCoverDataUrl(b64);
-              }
-            });
-          }
         }
       } catch (err) {
         console.error('Error fetching lyrics:', err);
@@ -250,19 +233,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const generatePosterImage = async (targetPixelRatio = 4) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
-
-    // Ensure cover is converted to Base64 to prevent CORS taint
-    if (!coverDataUrl && song?.albumCover) {
-      try {
-        const b64 = await urlToBase64(song.albumCover);
-        if (b64) {
-          setCoverDataUrl(b64);
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        }
-      } catch (err) {
-        console.warn('Pre-export cover conversion warning:', err);
-      }
-    }
 
     const width = node.offsetWidth;
     const height = node.offsetHeight;
@@ -636,7 +606,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={coverDataUrl || song.albumCover}
+              customCoverUrl={song.albumCover}
             />
           </div>
         </div>
