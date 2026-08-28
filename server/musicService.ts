@@ -54,52 +54,148 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&apos;/g, "'");
 }
 
+/**
+ * Smart Multi-Line Translation Redistribution & Alignment
+ * Automatically splits multi-clause combined translations (e.g. "每次想起你 总是泛起悲伤…" or "A / B")
+ * across consecutive rhythm lines that belong to the same musical phrase.
+ */
+export function distributeTranslations(lines: LyricLine[]): LyricLine[] {
+  if (!lines || lines.length === 0) return lines;
+
+  const result: LyricLine[] = lines.map((l) => ({ ...l }));
+  const n = result.length;
+
+  let i = 0;
+  while (i < n) {
+    const current = result[i];
+    const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(
+      current.text
+    );
+
+    if (!current.translation || isMeta) {
+      i++;
+      continue;
+    }
+
+    // Find consecutive subsequent lines that have NO translation
+    let j = i + 1;
+    while (
+      j < n &&
+      !result[j].translation &&
+      !/^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(
+        result[j].text
+      ) &&
+      (result[j].time === undefined ||
+        result[j - 1].time === undefined ||
+        result[j].time! - result[j - 1].time! <= 12)
+    ) {
+      j++;
+    }
+
+    const groupSize = j - i;
+    if (groupSize >= 2) {
+      const trans = current.translation.trim();
+      const hasChinese = /[\u4e00-\u9fa5]/.test(trans);
+
+      // Delimiters ordered by semantic priority
+      const delimiters: RegExp[] = [
+        /\s*[\/\\|｜]\s*/, // Slashes or pipes
+        /[\s\u3000]+/, // Spaces (half or full width)
+        /\s*[;；]\s*/, // Semicolons
+        /\s*(?:[\u2026\u22ef]{1,}|\.{3,}|\~{2,}|——|--)\s*/, // Ellipsis / wave / dashes
+        /\s*[，,、]\s*/, // Commas / enumeration
+      ];
+
+      for (const delim of delimiters) {
+        // If translation is Latin only (e.g. English words), don't split by single space
+        if (!hasChinese && delim.source === '[\\s\\u3000]+') {
+          continue;
+        }
+
+        const parts = trans.split(delim).map((s) => s.trim()).filter(Boolean);
+        if (parts.length === groupSize) {
+          // Exact split match: assign one part to each line in the group
+          for (let k = 0; k < groupSize; k++) {
+            result[i + k].translation = parts[k];
+          }
+          break;
+        } else if (parts.length > groupSize && parts.length > 1) {
+          // More parts than lines: group parts cleanly into groupSize chunks
+          const grouped: string[] = [];
+          const step = parts.length / groupSize;
+          for (let k = 0; k < groupSize; k++) {
+            const startIdx = Math.round(k * step);
+            const endIdx = Math.round((k + 1) * step);
+            const slice = parts.slice(startIdx, endIdx);
+            grouped.push(slice.join(hasChinese ? ' ' : ' '));
+          }
+          for (let k = 0; k < groupSize; k++) {
+            result[i + k].translation = grouped[k];
+          }
+          break;
+        }
+      }
+    }
+
+    i = j;
+  }
+
+  return result;
+}
+
 // Parse standard LRC format into structured lines with robust translation matching
 export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
   if (!lrcText) return [];
 
-  const timeRegex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g;
+  const timeRegex = /\[(\d{1,2}):(\d{2})(?:[.:](\d{2,3}))?\]/g;
   const lines = lrcText.split('\n');
-  const parsedMap = new Map<number, { text: string; translation?: string; isMeta: boolean }>();
+  const parsedItems: Array<{ time: number; text: string; translation?: string; isMeta: boolean; origIndex: number }> = [];
   const nonTimedLines: string[] = [];
 
-  // Parse original lyrics
+  let lineCounter = 0;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || /^\[(ti|ar|al|by|offset|kana):/i.test(trimmed)) continue;
 
     const matches = [...trimmed.matchAll(timeRegex)];
-    const text = trimmed.replace(timeRegex, '').trim();
+    let text = trimmed.replace(timeRegex, '').trim();
 
     if (matches.length > 0) {
       if (text) {
         const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(text);
+
+        // Check if the line has inline translation in parentheses, e.g. "Never gonna give you up (决不会放弃你)"
+        let inlineTrans: string | undefined = undefined;
+        if (!isMeta) {
+          const inlineMatch = text.match(/^(.+?)\s*[（(【]([\u4e00-\u9fa5\s，。！？、…~]+)[）)】]$/);
+          if (inlineMatch && /[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/.test(inlineMatch[1])) {
+            text = inlineMatch[1].trim();
+            inlineTrans = inlineMatch[2].trim();
+          }
+        }
+
         for (const match of matches) {
           const minutes = parseInt(match[1], 10);
           const seconds = parseInt(match[2], 10);
           const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
           const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
 
-          // Check if timestamp already exists
-          const existing = parsedMap.get(totalSeconds);
-          if (existing) {
-            // If existing is foreign/non-Chinese and current line has Chinese characters, treat as translation
-            if (!/[\u4e00-\u9fa5]/.test(existing.text) && /[\u4e00-\u9fa5]/.test(text)) {
-              existing.translation = text;
-            } else if (/[\u4e00-\u9fa5]/.test(existing.text) && !/[\u4e00-\u9fa5]/.test(text)) {
-              parsedMap.set(totalSeconds, { text, translation: existing.text, isMeta });
-            } else if (!existing.text && text) {
-              parsedMap.set(totalSeconds, { text, isMeta });
-            }
-          } else {
-            parsedMap.set(totalSeconds, { text, isMeta });
-          }
+          parsedItems.push({
+            time: totalSeconds,
+            text,
+            translation: inlineTrans,
+            isMeta,
+            origIndex: lineCounter++,
+          });
         }
       }
     } else if (trimmed) {
       nonTimedLines.push(trimmed);
     }
   }
+
+  // Sort original lines by timestamp, preserving original document order for identical timestamps
+  parsedItems.sort((a, b) => a.time - b.time || a.origIndex - b.origIndex);
 
   // Parse external translation lyrics if present
   if (tlyricText) {
@@ -127,55 +223,63 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
       }
     }
 
+    validTransLines.sort((a, b) => a.time - b.time);
+
     let matchedCount = 0;
-    // Step 1: Fuzzy timestamp matching (tolerance up to 1.5s)
+    const usedOriginalIndices = new Set<number>();
+
+    // Step 1: Best-fit timestamp matching (tolerance up to 2.2s)
     for (const transItem of validTransLines) {
-      let bestKey: number | null = null;
+      let bestIdx: number | null = null;
       let minDiff = Infinity;
 
-      for (const [key, val] of parsedMap.entries()) {
-        const diff = Math.abs(key - transItem.time);
-        const adjustedDiff = val.isMeta ? diff + 0.8 : (val.translation ? diff + 0.4 : diff);
+      for (let idx = 0; idx < parsedItems.length; idx++) {
+        const item = parsedItems[idx];
+        const diff = Math.abs(item.time - transItem.time);
+        const penalty = item.isMeta ? 1.0 : (usedOriginalIndices.has(idx) || item.translation ? 0.6 : 0);
+        const adjustedDiff = diff + penalty;
+
         if (adjustedDiff < minDiff) {
           minDiff = adjustedDiff;
-          bestKey = key;
+          bestIdx = idx;
         }
       }
 
-      if (bestKey !== null && minDiff <= 1.5) {
-        const current = parsedMap.get(bestKey)!;
-        if (!current.translation || minDiff <= 0.3) {
-          current.translation = transItem.text;
+      if (bestIdx !== null && minDiff <= 2.2) {
+        const target = parsedItems[bestIdx];
+        if (!target.translation || !usedOriginalIndices.has(bestIdx)) {
+          target.translation = transItem.text;
+          usedOriginalIndices.add(bestIdx);
           matchedCount++;
         }
       }
     }
 
-    // Step 2: Fallback sequential alignment if timestamp matching failed
-    if (matchedCount === 0 && validTransLines.length > 0 && parsedMap.size > 0) {
-      const sortedKeys = Array.from(parsedMap.keys()).sort((a, b) => a - b);
-      const nonMetaKeys = sortedKeys.filter((k) => !parsedMap.get(k)?.isMeta);
-      const targetKeys = nonMetaKeys.length > 0 ? nonMetaKeys : sortedKeys;
+    // Step 2: Fallback sequential alignment if timestamp matching was sparse
+    if (matchedCount < Math.min(3, validTransLines.length) && validTransLines.length > 0 && parsedItems.length > 0) {
+      const nonMetaIndices = parsedItems
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => !item.isMeta)
+        .map(({ idx }) => idx);
 
-      const count = Math.min(targetKeys.length, validTransLines.length);
+      const targetIndices = nonMetaIndices.length > 0 ? nonMetaIndices : parsedItems.map((_, idx) => idx);
+      const count = Math.min(targetIndices.length, validTransLines.length);
+
       for (let i = 0; i < count; i++) {
-        const key = targetKeys[i];
-        const val = parsedMap.get(key);
-        if (val && !val.translation) {
-          val.translation = validTransLines[i].text;
+        const targetIdx = targetIndices[i];
+        if (!parsedItems[targetIdx].translation) {
+          parsedItems[targetIdx].translation = validTransLines[i].text;
         }
       }
     }
   }
 
-  let result: LyricLine[] = Array.from(parsedMap.entries())
-    .map(([time, val], idx) => ({
-      id: `line-${time}-${idx}`,
-      time,
-      text: val.text,
-      translation: val.translation,
-    }))
-    .sort((a, b) => (a.time || 0) - (b.time || 0));
+  let result: LyricLine[] = parsedItems.map((item, idx) => ({
+    id: `line-${item.time}-${idx}`,
+    time: item.time,
+    text: item.text,
+    translation: item.translation,
+  }));
 
   if (result.length === 0 && nonTimedLines.length > 0) {
     result = nonTimedLines.map((text, idx) => ({
@@ -183,6 +287,9 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
       text,
     }));
   }
+
+  // Step 3: Smart multi-line translation redistribution (e.g. Nogizaka46 / J-Pop / K-Pop rhythm split lines)
+  result = distributeTranslations(result);
 
   return result;
 }
