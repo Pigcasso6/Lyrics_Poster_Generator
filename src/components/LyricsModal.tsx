@@ -252,7 +252,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
           const dataUrl = await toPng(node, {
             quality: 0.98,
             pixelRatio: ratio,
-            cacheBust: false,
+            cacheBust: true, // Prevent html-to-image from caching the first rendered image
             skipFonts: true,
             imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
             width,

@@ -2,6 +2,7 @@ import React from 'react';
 import { Song, LyricLine, PosterConfig, PosterTheme, PosterFont } from '../types';
 import { cleanPosterSongTitle, cleanArtistName, cleanAlbumName } from '../utils/cleanTitle';
 import { generateVinylCoverSvg } from '../utils/cover';
+import { urlToBase64 } from '../utils/image';
 
 export const FONT_FAMILY_MAP: Record<string, string> = {
   'noto-sans-sc': '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
@@ -89,6 +90,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   };
 
   const [imgErrorCount, setImgErrorCount] = React.useState(0);
+  const [base64Cover, setBase64Cover] = React.useState<string | null>(null);
 
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
@@ -98,10 +100,25 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   React.useEffect(() => {
     setImgErrorCount(0);
+    setBase64Cover(null);
+
+    if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
+      let isMounted = true;
+      urlToBase64(rawCover).then(dataUrl => {
+        if (isMounted && dataUrl && dataUrl.startsWith('data:')) {
+          setBase64Cover(dataUrl);
+        }
+      }).catch(err => console.warn('Preload base64 failed:', err));
+      return () => { isMounted = false; };
+    } else if (rawCover) {
+      setBase64Cover(rawCover);
+    }
   }, [rawCover]);
 
   let coverImageSrc = rawCover;
-  if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
+  if (base64Cover) {
+    coverImageSrc = base64Cover;
+  } else if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
     if (imgErrorCount === 0) {
       coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`;
     } else if (imgErrorCount === 1) {
@@ -133,10 +150,10 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
       {config.showCover && (
         <div className="relative z-10 w-full flex justify-center pb-2 shrink-0">
           <div
-            className={`aspect-square overflow-hidden bg-black/5 relative rounded-none ${
+            className={`aspect-square overflow-hidden relative rounded-none ${
               config.theme === 'polaroid'
-                ? 'border border-black/10 shadow-inner'
-                : 'shadow-md border border-current/10'
+                ? 'border border-black/10'
+                : 'border border-current/10'
             } ${
               config.aspectRatio === '9:16'
                 ? 'w-36 max-w-[55%]'

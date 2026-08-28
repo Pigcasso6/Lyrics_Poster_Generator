@@ -108,6 +108,11 @@ async function startServer() {
     const urlIdx = rawOriginalUrl.indexOf('url=');
     if (urlIdx !== -1) {
       targetUrl = rawOriginalUrl.substring(urlIdx + 4);
+      // Remove any trailing parameters that might be appended by html-to-image cacheBust
+      const ampIdx = targetUrl.lastIndexOf('&t=');
+      if (ampIdx !== -1) {
+        targetUrl = targetUrl.substring(0, ampIdx);
+      }
       try {
         targetUrl = decodeURIComponent(targetUrl);
       } catch (e) {}
