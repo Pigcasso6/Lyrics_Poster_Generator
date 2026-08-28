@@ -132,18 +132,10 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               src={coverImageSrc}
               alt={cleanSongName}
               referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
               className="w-full h-full object-cover block"
               onError={(e) => {
                 const target = e.currentTarget;
-                const stage = Number(target.dataset.fallbackStage || '0');
-                if (stage === 0 && rawCoverSrc && !rawCoverSrc.startsWith('data:') && !rawCoverSrc.includes('/api/music/proxy-image')) {
-                  target.dataset.fallbackStage = '1';
-                  target.src = `/api/music/proxy-image?url=${encodeURIComponent(rawCoverSrc)}`;
-                } else if (stage < 2) {
-                  target.dataset.fallbackStage = '2';
-                  target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
-                }
+                target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
               }}
             />
           </div>

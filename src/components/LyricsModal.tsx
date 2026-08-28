@@ -547,8 +547,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
             )}
           </button>
 
-          {/* Copy Poster Image */}
-          {/* Desktop version with text */}
+          {/* Copy Poster Image (Desktop only) */}
           <button
             type="button"
             id="copy-poster-image-btn"
@@ -566,22 +565,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
                 <Copy className="w-3.5 h-3.5" />
                 <span>复制海报</span>
               </>
-            )}
-          </button>
-
-          {/* Mobile version: Icon only, rounded square, triggers scale modal */}
-          <button
-            type="button"
-            id="mobile-copy-poster-btn"
-            onClick={() => setExportModalType('copy')}
-            disabled={isExporting}
-            className="lg:hidden w-9 h-9 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-850 active:bg-slate-800 text-slate-200 transition-colors cursor-pointer disabled:opacity-50"
-            title="复制海报"
-          >
-            {copyStatus === 'image' ? (
-              <Check className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <Copy className="w-4 h-4" />
             )}
           </button>
 
@@ -650,7 +633,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={coverDataUrl}
+              customCoverUrl={song.albumCover}
             />
           </div>
         </div>
