@@ -403,7 +403,59 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
     console.warn('NetEase cloudsearch error:', err);
   }
 
-  // Strategy 2: NetEase search/get/web fallback
+  // Strategy 2: NetEase iOS API (frequently unblocked on overseas VPS)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const url = `https://music.163.com/api/search/get?s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=30`;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        ...commonHeaders,
+        'User-Agent': 'NeteaseMusic/8.9.70 (iPhone; iOS 16.0; zh_CN)',
+        'Cookie': 'os=ios; appver=8.9.70; osver=16.0; channel=appstore;',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const songList = data?.result?.songs;
+      if (Array.isArray(songList) && songList.length > 0) {
+        for (const s of songList) {
+          const rawArtistName = s.artists?.map((a: any) => a.name).join('/') || '未知歌手';
+          const artistName = cleanArtist(rawArtistName);
+          const albumName = s.album?.name || '单曲';
+          let albumPic = s.album?.picUrl || '';
+          if (albumPic) {
+            albumPic = albumPic.replace('http:', 'https:');
+            if (!albumPic.includes('?param=')) {
+              albumPic += '?param=500y500';
+            }
+          } else {
+            albumPic = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80';
+          }
+
+          songs.push({
+            id: String(s.id),
+            platform: 'netease',
+            name: s.name || keyword,
+            artist: artistName,
+            album: albumName,
+            albumCover: albumPic,
+            duration: Math.round((s.duration || 210000) / 1000),
+            url: `https://music.163.com/#/song?id=${s.id}`,
+          });
+        }
+        return songs;
+      }
+    }
+  } catch (err) {
+    console.warn('NetEase iOS search error:', err);
+  }
+
+  // Strategy 3: NetEase search/get/web fallback
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -454,7 +506,71 @@ export async function searchNetease(keyword: string): Promise<Song[]> {
     console.warn('NetEase search/get/web error:', err);
   }
 
-  // Strategy 3: Check static library
+  // Strategy 4: High-speed Meting mirror failover
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const metingUrl = `https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(keyword)}`;
+    const res = await fetch(metingUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          const realId = (item.lrc && item.lrc.match(/id=(\d+)/)?.[1]) || (item.url && item.url.match(/id=(\d+)/)?.[1]) || String(item.id || i);
+          songs.push({
+            id: realId,
+            platform: 'netease',
+            name: item.title || keyword,
+            artist: cleanArtist(item.author || '未知歌手'),
+            album: item.title || '单曲',
+            albumCover: item.pic || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
+            duration: 240,
+            url: item.url || `https://music.163.com/#/song?id=${realId}`,
+            lrcUrl: item.lrc,
+          });
+        }
+        return songs;
+      }
+    }
+  } catch (e) {
+    console.warn('NetEase Meting search mirror error:', e);
+  }
+
+  // Strategy 5: GDStudio mirror failover
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const gdUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=25&source=netease&name=${encodeURIComponent(keyword)}`;
+    const res = await fetch(gdUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        for (const item of list) {
+          const artistName = Array.isArray(item.artist) ? item.artist.join('/') : (item.artist || '未知歌手');
+          songs.push({
+            id: String(item.id || item.url_id),
+            platform: 'netease',
+            name: item.name || keyword,
+            artist: cleanArtist(artistName),
+            album: item.album || '单曲',
+            albumCover: item.pic_id
+              ? `https://p1.music.126.net/${item.pic_id}.jpg?param=500y500`
+              : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
+            duration: 240,
+            url: `https://music.163.com/#/song?id=${item.id}`,
+          });
+        }
+        return songs;
+      }
+    }
+  } catch (e) {
+    console.warn('NetEase GDStudio search error:', e);
+  }
+
+  // Strategy 6: Check static library
   const kw = keyword.toLowerCase().trim();
   const matched = POPULAR_SONG_DB.filter(
     (s) =>
@@ -635,12 +751,29 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
 }
 
 // Fetch NetEase Song Lyrics & Details
-export async function getNeteaseDetail(id: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
+export async function getNeteaseDetail(id: string, songName?: string, lrcUrl?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
   let rawLyric = '';
   let rawTLyric = '';
   let albumCover = '';
   const commonHeaders = getCommonHeaders('https://music.163.com/');
 
+  // Strategy 0: If direct authenticated lrcUrl is passed, fetch it first
+  if (lrcUrl) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(lrcUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.includes('[') && !text.includes('鉴权失败') && !text.includes('非法调用')) {
+          rawLyric = text;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Strategy 1: Real NetEase lyric & detail APIs
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4500);
@@ -661,7 +794,7 @@ export async function getNeteaseDetail(id: string): Promise<{ lyrics: LyricLine[
 
     clearTimeout(timeoutId);
 
-    if (lyricRes.status === 'fulfilled' && lyricRes.value.ok) {
+    if (!rawLyric && lyricRes.status === 'fulfilled' && lyricRes.value.ok) {
       const data = await lyricRes.value.json();
       rawLyric = data?.lrc?.lyric || '';
       rawTLyric = data?.tlyric?.lyric || '';
@@ -698,9 +831,40 @@ export async function getNeteaseDetail(id: string): Promise<{ lyrics: LyricLine[
     } catch (e) {}
   }
 
-  // Strategy 3: If no rawLyric returned from API, check our smart library
+  // Strategy 3: Meting search & lyric mirror fallback by song ID / name
   if (!rawLyric) {
-    const fallback = findFallbackByIdOrKeyword(id);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const searchKw = songName || id;
+      const res = await fetch(`https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(searchKw)}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list) && list.length > 0) {
+          const matched = list.find((it: any) => String(it.id) === String(id) || (it.lrc && it.lrc.includes(`id=${id}`))) || list[0];
+          if (matched?.lrc) {
+            const lRes = await fetch(matched.lrc);
+            if (lRes.ok) {
+              const lText = await lRes.text();
+              if (lText && lText.includes('[') && !lText.includes('鉴权失败')) {
+                rawLyric = lText;
+              }
+            }
+          }
+          if (!albumCover && matched?.pic) {
+            albumCover = matched.pic;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Strategy 4: If no rawLyric returned from API, check our smart library
+  if (!rawLyric) {
+    const fallback = findFallbackByIdOrKeyword(songName || id);
     if (fallback) {
       rawLyric = fallback.lrc;
       rawTLyric = fallback.tlyric || '';

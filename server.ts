@@ -64,7 +64,7 @@ async function startServer() {
       if (platform === 'qq') {
         lyricData = await getQQDetail(id, songMid);
       } else {
-        lyricData = await getNeteaseDetail(id);
+        lyricData = await getNeteaseDetail(id, name, req.query.lrcUrl as string);
       }
 
       res.json({

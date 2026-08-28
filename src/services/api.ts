@@ -322,6 +322,159 @@ export function browserJsonp<T>(url: string, callbackParam = 'jsonpCallback'): P
   });
 }
 
+// Client-side Direct NetEase Music Search via CORS Mirrors
+async function clientSearchNetease(keyword: string): Promise<Song[]> {
+  const songs: Song[] = [];
+
+  // Mirror 1: i-meto Meting API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const url = `https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(keyword)}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          const realId =
+            (item.lrc && item.lrc.match(/id=(\d+)/)?.[1]) ||
+            (item.url && item.url.match(/id=(\d+)/)?.[1]) ||
+            String(item.id || i);
+
+          songs.push({
+            id: realId,
+            platform: 'netease',
+            name: item.title || keyword,
+            artist: cleanArtist(item.author || '未知歌手'),
+            album: item.title || '单曲',
+            albumCover: item.pic || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
+            duration: 240,
+            url: item.url || `https://music.163.com/#/song?id=${realId}`,
+            lrcUrl: item.lrc,
+          });
+        }
+        if (songs.length > 0) return songs;
+      }
+    }
+  } catch (err) {
+    console.warn('Client NetEase mirror 1 failed:', err);
+  }
+
+  // Mirror 2: GDStudio API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const url = `https://music-api.gdstudio.xyz/api.php?types=search&count=25&source=netease&name=${encodeURIComponent(keyword)}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        for (const item of list) {
+          const artistName = Array.isArray(item.artist) ? item.artist.join('/') : (item.artist || '未知歌手');
+          songs.push({
+            id: String(item.id || item.url_id),
+            platform: 'netease',
+            name: item.name || keyword,
+            artist: cleanArtist(artistName),
+            album: item.album || '单曲',
+            albumCover: item.pic_id
+              ? `https://p1.music.126.net/${item.pic_id}.jpg?param=500y500`
+              : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
+            duration: 240,
+            url: `https://music.163.com/#/song?id=${item.id}`,
+          });
+        }
+        if (songs.length > 0) return songs;
+      }
+    }
+  } catch (err) {
+    console.warn('Client NetEase mirror 2 failed:', err);
+  }
+
+  return songs;
+}
+
+// Client-side Direct NetEase Lyric Fetcher
+async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
+  // Strategy 1: Direct authenticated lrcUrl from search results
+  if (song.lrcUrl) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(song.lrcUrl, { signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.includes('[') && !text.includes('鉴权失败') && !text.includes('非法调用')) {
+          const parsed = parseLrc(text);
+          if (parsed.length > 0) {
+            return {
+              lyrics: parsed,
+              rawLyric: text,
+              albumCover: song.albumCover,
+            };
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Strategy 2: Meting Search & Lyric Retrieval
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const searchKw = song.name || song.id;
+    const url = `https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(searchKw)}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        const matched =
+          list.find((it: any) => String(it.id) === String(song.id) || (it.lrc && it.lrc.includes(`id=${song.id}`))) ||
+          list[0];
+
+        if (matched?.lrc) {
+          const lRes = await fetch(matched.lrc);
+          if (lRes.ok) {
+            const lText = await lRes.text();
+            if (lText && lText.includes('[') && !lText.includes('鉴权失败')) {
+              return {
+                lyrics: parseLrc(lText),
+                rawLyric: lText,
+                albumCover: matched.pic || song.albumCover,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // Strategy 3: Local popular song fallback
+  const fallback = FALLBACK_POPULAR_SONGS.find(
+    (s) =>
+      (song.name && s.name.toLowerCase().includes(song.name.toLowerCase())) ||
+      (song.name && song.name.toLowerCase().includes(s.name.toLowerCase()))
+  );
+  if (fallback) {
+    return {
+      lyrics: parseLrc(fallback.lrc, fallback.tlyric),
+      rawLyric: fallback.lrc,
+      rawTLyric: fallback.tlyric,
+      albumCover: fallback.neteaseCover,
+    };
+  }
+
+  return { lyrics: [], rawLyric: '' };
+}
+
 // Client-side Direct QQ Music Search via JSONP
 async function clientSearchQQ(keyword: string): Promise<Song[]> {
   try {
@@ -447,19 +600,32 @@ export async function searchMusic(keyword: string): Promise<SearchResponse> {
     console.warn('Backend /api/music/search failed or unreachable:', err);
   }
 
-  // If backend returned results, return them
-  if (serverData && ((serverData.netease && serverData.netease.length > 0) || (serverData.qq && serverData.qq.length > 0))) {
-    return serverData;
+  // If backend returned results, check if we need to supplement missing platforms
+  const hasServerNetease = Boolean(serverData?.netease && serverData.netease.length > 0);
+  const hasServerQQ = Boolean(serverData?.qq && serverData.qq.length > 0);
+
+  if (hasServerNetease && hasServerQQ) {
+    return serverData!;
   }
 
-  // Step 2: Client-side Direct Search Fallback (Zero-failure guarantee for static deployments!)
+  // Step 2: Client-side Direct Search Fallback (Zero-failure guarantee for static deployments & overseas servers!)
   console.info('Activating client-side direct search failover for:', cleanKw);
-  let qqSongs: Song[] = [];
-  try {
-    qqSongs = await clientSearchQQ(cleanKw);
-  } catch (e) {}
+  let neteaseSongs: Song[] = hasServerNetease ? (serverData?.netease || []) : [];
+  let qqSongs: Song[] = hasServerQQ ? (serverData?.qq || []) : [];
 
-  // Match with static popular song database
+  const [directNeteaseRes, directQQRes] = await Promise.allSettled([
+    !hasServerNetease ? clientSearchNetease(cleanKw) : Promise.resolve([]),
+    !hasServerQQ ? clientSearchQQ(cleanKw) : Promise.resolve([]),
+  ]);
+
+  if (!hasServerNetease && directNeteaseRes.status === 'fulfilled' && directNeteaseRes.value.length > 0) {
+    neteaseSongs = directNeteaseRes.value;
+  }
+  if (!hasServerQQ && directQQRes.status === 'fulfilled' && directQQRes.value.length > 0) {
+    qqSongs = directQQRes.value;
+  }
+
+  // Match with static popular song database if still empty
   const kwLower = cleanKw.toLowerCase();
   const dbMatches = FALLBACK_POPULAR_SONGS.filter(
     (s) =>
@@ -468,39 +634,40 @@ export async function searchMusic(keyword: string): Promise<SearchResponse> {
       s.artist.toLowerCase().includes(kwLower)
   );
 
-  const neteaseFallback: Song[] = dbMatches.map((item, idx) => ({
-    id: `netease_local_${idx + 1}`,
-    platform: 'netease',
-    name: item.name,
-    artist: item.artist,
-    album: item.album,
-    albumCover: item.neteaseCover,
-    duration: item.duration,
-    releaseDate: item.releaseDate,
-    url: 'https://music.163.com',
-  }));
+  if (neteaseSongs.length === 0) {
+    neteaseSongs = dbMatches.map((item, idx) => ({
+      id: `netease_local_${idx + 1}`,
+      platform: 'netease',
+      name: item.name,
+      artist: item.artist,
+      album: item.album,
+      albumCover: item.neteaseCover,
+      duration: item.duration,
+      releaseDate: item.releaseDate,
+      url: 'https://music.163.com',
+    }));
+  }
 
-  const qqFallback: Song[] =
-    qqSongs.length > 0
-      ? qqSongs
-      : dbMatches.map((item, idx) => ({
-          id: `qq_local_${idx + 1}`,
-          songMid: `mid_${idx}`,
-          platform: 'qq',
-          name: item.name,
-          artist: item.artist,
-          album: item.album,
-          albumCover: item.qqCover,
-          duration: item.duration,
-          releaseDate: item.releaseDate,
-          url: 'https://y.qq.com',
-        }));
+  if (qqSongs.length === 0) {
+    qqSongs = dbMatches.map((item, idx) => ({
+      id: `qq_local_${idx + 1}`,
+      songMid: `mid_${idx}`,
+      platform: 'qq',
+      name: item.name,
+      artist: item.artist,
+      album: item.album,
+      albumCover: item.qqCover,
+      duration: item.duration,
+      releaseDate: item.releaseDate,
+      url: 'https://y.qq.com',
+    }));
+  }
 
   return {
     keyword: cleanKw,
-    netease: (serverData?.netease?.length ? serverData.netease : neteaseFallback),
-    qq: qqFallback,
-    total: (serverData?.netease?.length ? serverData.netease.length : neteaseFallback.length) + qqFallback.length,
+    netease: neteaseSongs,
+    qq: qqSongs,
+    total: neteaseSongs.length + qqSongs.length,
   };
 }
 
@@ -517,6 +684,7 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
     albumCover: song.albumCover,
   });
   if (song.songMid) params.append('songMid', song.songMid);
+  if (song.lrcUrl) params.append('lrcUrl', song.lrcUrl);
 
   // Step 1: Try backend API
   try {
@@ -542,15 +710,29 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
   }
 
   // Step 2: Client-side Direct Lyric Fetcher
-  console.info('Activating client-side direct lyric fetcher for:', song.name);
-  if (song.songMid) {
-    const directQQ = await clientFetchQQLyrics(song.songMid, song.name);
+  console.info('Activating client-side direct lyric fetcher for:', song.name, song.platform);
+  if (song.platform === 'qq') {
+    const directQQ = await clientFetchQQLyrics(song.songMid || song.id, song.name);
     if (directQQ.lyrics.length > 0) {
       return {
         song,
         rawLyric: directQQ.rawLyric,
         rawTLyric: directQQ.rawTLyric,
         lyrics: directQQ.lyrics,
+        hasLyric: true,
+      };
+    }
+  } else {
+    const directNetease = await clientFetchNeteaseLyrics(song);
+    if (directNetease.lyrics.length > 0) {
+      return {
+        song: {
+          ...song,
+          albumCover: directNetease.albumCover || song.albumCover,
+        },
+        rawLyric: directNetease.rawLyric,
+        rawTLyric: directNetease.rawTLyric,
+        lyrics: directNetease.lyrics,
         hasLyric: true,
       };
     }

@@ -12,6 +12,7 @@ export interface Song {
   albumMid?: string;
   releaseDate?: string;
   url?: string;
+  lrcUrl?: string;
 }
 
 export interface LyricLine {

@@ -66,16 +66,6 @@ export const SongCard: React.FC<SongCardProps> = ({ song, onSelect, isSelected }
           )}
         </div>
       </div>
-
-      {/* Right Action Button */}
-      <div className="shrink-0 hidden sm:flex items-center pr-2">
-        <button
-          type="button"
-          className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 group-hover:bg-sky-600 group-hover:text-white rounded-xl transition-all shadow-xs cursor-pointer"
-        >
-          <span>制作海报</span>
-        </button>
-      </div>
     </div>
   );
 };
