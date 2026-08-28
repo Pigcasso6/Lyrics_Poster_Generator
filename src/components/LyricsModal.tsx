@@ -237,39 +237,8 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
-    // Pre-fetch real cover as Base64 Data URL to guarantee cross-origin security during toPng
-    if (song?.albumCover && !song.albumCover.startsWith('data:')) {
-      try {
-        const cleanUrl = song.albumCover.replace(/^http:\/\//i, 'https://');
-        const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
-        
-        const res = await fetch(proxyUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (res.ok) {
-          const blob = await res.blob();
-          const b64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          if (b64 && b64.startsWith('data:image')) {
-            setExportCoverDataUrl(b64);
-            // Give React DOM time to update <img> src to b64
-            await new Promise((resolve) => setTimeout(resolve, 80));
-          }
-        }
-      } catch (err) {
-        console.warn('Pre-fetch cover for export warning:', err);
-      }
-    }
-
-    try {
-      const width = node.offsetWidth;
-      const height = node.offsetHeight;
+    const width = node.offsetWidth;
+    const height = node.offsetHeight;
 
       const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
 
@@ -304,9 +273,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         }
       }
       throw new Error('Failed to generate image across all resolution attempts');
-    } finally {
-      setExportCoverDataUrl(null);
-    }
   };
 
   // Export Poster as PNG image
@@ -629,7 +595,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={exportCoverDataUrl || (isExporting ? generateVinylCoverSvg(song.name, song.artist) : song.albumCover)}
+              customCoverUrl={song.albumCover}
             />
           </div>
         </div>

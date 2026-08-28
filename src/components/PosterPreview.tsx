@@ -95,6 +95,11 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   const cleanAlbum = cleanAlbumName(song.album);
   
   const rawCover = (customCoverUrl || song.albumCover || '').replace(/^http:\/\//i, 'https://');
+  
+  // Force route through same-origin proxy to completely avoid canvas cross-origin taint
+  const proxyCover = rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')
+    ? `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`
+    : rawCover;
 
   React.useEffect(() => {
     setImgError(false);
@@ -102,7 +107,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   const coverImageSrc = imgError || !rawCover
     ? generateVinylCoverSvg(cleanSongName, cleanArtist)
-    : rawCover;
+    : proxyCover;
 
   return (
     <div
@@ -141,6 +146,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
             <img
               src={coverImageSrc}
               alt={cleanSongName}
+              crossOrigin="anonymous"
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover block"
               onError={() => setImgError(true)}
