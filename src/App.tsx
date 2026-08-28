@@ -4,6 +4,7 @@ import { SongList } from './components/SongList';
 import { LyricsModal } from './components/LyricsModal';
 import { Song, PlatformType, SearchResponse } from './types';
 import { searchMusic } from './services/api';
+import { supabase } from './services/supabase';
 
 export default function App() {
   const [keyword, setKeyword] = useState('');
@@ -24,6 +25,11 @@ export default function App() {
     setHasSearched(true);
 
     try {
+      // Log search record to Supabase asynchronously without blocking
+      supabase.from('lyrics_search_records').insert([{ query: query.trim() }]).then(({ error }) => {
+        if (error) console.error('Failed to log search:', error);
+      });
+
       const data: SearchResponse = await searchMusic(query);
       setNeteaseResults(data.netease || []);
       setQqResults(data.qq || []);
