@@ -55,8 +55,105 @@ function decodeHtmlEntities(str: string): string {
 }
 
 /**
+ * Smart Chinese Clause & Semantic Boundary Splitter
+ * Splits a continuous Chinese translation sentence into N parts when explicit delimiters are absent,
+ * using clause conjunctions, particles, locatives, and proportional rhythm matching.
+ */
+function splitChineseClause(text: string, count: number, originalLengths?: number[]): string[] {
+  if (count <= 1 || !text) return [text];
+
+  const trimmed = text.trim();
+  if (trimmed.length < count * 2) {
+    return [trimmed];
+  }
+
+  // Common prefix keywords (indicates the start of a subsequent clause in Chinese)
+  const prefixKeywords = [
+    '还是', '却又', '却还', '却也', '却', '而且', '而', '但也', '但是', '但', '然而',
+    '不停地', '一直在', '一直', '正当', '正在', '只因', '只想', '只要是', '只要',
+    '无论', '哪怕', '就算', '即使', '如果', '为了', '不再', '不能', '无法',
+    '总是', '依然', '依旧', '渐渐', '悄悄', '默默', '终于',
+    '我却', '我正', '我已', '我就', '我', '你却', '你正', '你已', '你',
+    '他', '她', '它', '谁', '又', '已', '便', '就', '再'
+  ];
+
+  // Common suffix keywords (indicates the end of a preceding clause in Chinese)
+  const suffixKeywords = [
+    '之中', '人群中', '风中', '雨中', '心中', '眼中', '手中', '身旁', '身边',
+    '中', '里', '内', '外', '上', '下', '前', '后', '时', '刻', '处', '旁', '边', '底',
+    '去', '来', '着', '了', '过', '起', '到'
+  ];
+
+  if (count === 2) {
+    const len1 = originalLengths && originalLengths[0] ? originalLengths[0] : 1;
+    const len2 = originalLengths && originalLengths[1] ? originalLengths[1] : 1;
+    const ratio = Math.max(0.2, Math.min(0.8, len1 / (len1 + len2)));
+    const targetIdx = Math.round(trimmed.length * ratio);
+
+    let bestSplit = -1;
+    let bestScore = -Infinity;
+
+    const minIdx = Math.max(2, Math.floor(trimmed.length * 0.18));
+    const maxIdx = Math.min(trimmed.length - 2, Math.ceil(trimmed.length * 0.82));
+
+    for (let idx = minIdx; idx <= maxIdx; idx++) {
+      let score = 0;
+      const left = trimmed.slice(0, idx);
+      const right = trimmed.slice(idx);
+
+      // Distance penalty from target ratio
+      const dist = Math.abs(idx - targetIdx);
+      score -= dist * 2.0;
+
+      // Check if right starts with a prefix keyword
+      for (const kw of prefixKeywords) {
+        if (right.startsWith(kw)) {
+          score += kw.length * 9 + 18;
+          break;
+        }
+      }
+
+      // Check if left ends with a suffix keyword
+      for (const kw of suffixKeywords) {
+        if (left.endsWith(kw)) {
+          score += kw.length * 7 + 12;
+          break;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestSplit = idx;
+      }
+    }
+
+    if (bestSplit > 0 && bestScore > -25) {
+      return [trimmed.slice(0, bestSplit).trim(), trimmed.slice(bestSplit).trim()];
+    }
+
+    // Fallback: split strictly at targetIdx
+    const safeTarget = Math.max(2, Math.min(trimmed.length - 2, targetIdx));
+    return [trimmed.slice(0, safeTarget).trim(), trimmed.slice(safeTarget).trim()];
+  }
+
+  // Count > 2: split recursively
+  const result: string[] = [];
+  let remaining = trimmed;
+  for (let k = 0; k < count - 1; k++) {
+    const remainingCount = count - k;
+    const subLens = originalLengths ? originalLengths.slice(k) : undefined;
+    const parts = splitChineseClause(remaining, remainingCount, subLens);
+    result.push(parts[0]);
+    remaining = parts.slice(1).join('');
+  }
+  result.push(remaining);
+  return result;
+}
+
+/**
  * Smart Multi-Line Translation Redistribution & Alignment
- * Automatically splits multi-clause combined translations (e.g. "每次想起你 总是泛起悲伤…" or "A / B")
+ * Automatically splits multi-clause combined translations (e.g. "每次想起你 总是泛起悲伤…" or "A / B"
+ * or continuous Chinese clauses "在纷乱人群中还是不停地寻找你")
  * across consecutive rhythm lines that belong to the same musical phrase.
  */
 export function distributeTranslations(lines: LyricLine[]): LyricLine[] {
@@ -106,6 +203,8 @@ export function distributeTranslations(lines: LyricLine[]): LyricLine[] {
         /\s*[，,、]\s*/, // Commas / enumeration
       ];
 
+      let splitApplied = false;
+
       for (const delim of delimiters) {
         // If translation is Latin only (e.g. English words), don't split by single space
         if (!hasChinese && delim.source === '[\\s\\u3000]+') {
@@ -114,13 +213,12 @@ export function distributeTranslations(lines: LyricLine[]): LyricLine[] {
 
         const parts = trans.split(delim).map((s) => s.trim()).filter(Boolean);
         if (parts.length === groupSize) {
-          // Exact split match: assign one part to each line in the group
           for (let k = 0; k < groupSize; k++) {
             result[i + k].translation = parts[k];
           }
+          splitApplied = true;
           break;
         } else if (parts.length > groupSize && parts.length > 1) {
-          // More parts than lines: group parts cleanly into groupSize chunks
           const grouped: string[] = [];
           const step = parts.length / groupSize;
           for (let k = 0; k < groupSize; k++) {
@@ -132,7 +230,20 @@ export function distributeTranslations(lines: LyricLine[]): LyricLine[] {
           for (let k = 0; k < groupSize; k++) {
             result[i + k].translation = grouped[k];
           }
+          splitApplied = true;
           break;
+        }
+      }
+
+      // If no explicit delimiter worked and translation is Chinese:
+      // apply smart Chinese semantic clause splitting based on original lines' rhythm and length!
+      if (!splitApplied && hasChinese && trans.length >= groupSize * 2) {
+        const origLengths = result.slice(i, j).map((line) => line.text.replace(/[\s\(\)（）]/g, '').length || 1);
+        const chineseParts = splitChineseClause(trans, groupSize, origLengths);
+        if (chineseParts.length === groupSize && chineseParts.every((p) => p.length > 0)) {
+          for (let k = 0; k < groupSize; k++) {
+            result[i + k].translation = chineseParts[k];
+          }
         }
       }
     }
@@ -158,35 +269,79 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     if (!trimmed || /^\[(ti|ar|al|by|offset|kana):/i.test(trimmed)) continue;
 
     const matches = [...trimmed.matchAll(timeRegex)];
-    let text = trimmed.replace(timeRegex, '').trim();
 
     if (matches.length > 0) {
-      if (text) {
-        const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(text);
+      // Check if timestamps are stacked at start or interspersed with text
+      let isStackedAtStart = true;
+      let lastEnd = 0;
+      for (const m of matches) {
+        if (m.index !== undefined && m.index !== lastEnd) {
+          isStackedAtStart = false;
+          break;
+        }
+        lastEnd = (m.index || 0) + m[0].length;
+      }
 
-        // Check if the line has inline translation in parentheses, e.g. "Never gonna give you up (决不会放弃你)"
-        let inlineTrans: string | undefined = undefined;
-        if (!isMeta) {
-          const inlineMatch = text.match(/^(.+?)\s*[（(【]([\u4e00-\u9fa5\s，。！？、…~]+)[）)】]$/);
-          if (inlineMatch && /[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/.test(inlineMatch[1])) {
-            text = inlineMatch[1].trim();
-            inlineTrans = inlineMatch[2].trim();
+      if (isStackedAtStart) {
+        let text = trimmed.slice(lastEnd).trim();
+        if (text) {
+          const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(text);
+          let inlineTrans: string | undefined = undefined;
+          if (!isMeta) {
+            const inlineMatch = text.match(/^(.+?)\s*[（(【]([\u4e00-\u9fa5\s，。！？、…~]+)[）)】]$/);
+            if (inlineMatch && /[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/.test(inlineMatch[1])) {
+              text = inlineMatch[1].trim();
+              inlineTrans = inlineMatch[2].trim();
+            }
+          }
+
+          for (const match of matches) {
+            const minutes = parseInt(match[1], 10);
+            const seconds = parseInt(match[2], 10);
+            const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+            const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
+
+            parsedItems.push({
+              time: totalSeconds,
+              text,
+              translation: inlineTrans,
+              isMeta,
+              origIndex: lineCounter++,
+            });
           }
         }
+      } else {
+        // Interspersed timestamps e.g. [00:22.00](だけど) [00:23.20]でも自分に嘘はつけない
+        for (let idx = 0; idx < matches.length; idx++) {
+          const curMatch = matches[idx];
+          const startIdx = (curMatch.index || 0) + curMatch[0].length;
+          const endIdx = idx + 1 < matches.length ? (matches[idx + 1].index || trimmed.length) : trimmed.length;
+          let partText = trimmed.slice(startIdx, endIdx).trim();
 
-        for (const match of matches) {
-          const minutes = parseInt(match[1], 10);
-          const seconds = parseInt(match[2], 10);
-          const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
-          const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
+          if (partText) {
+            const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(partText);
+            let inlineTrans: string | undefined = undefined;
+            if (!isMeta) {
+              const inlineMatch = partText.match(/^(.+?)\s*[（(【]([\u4e00-\u9fa5\s，。！？、…~]+)[）)】]$/);
+              if (inlineMatch && /[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/.test(inlineMatch[1])) {
+                partText = inlineMatch[1].trim();
+                inlineTrans = inlineMatch[2].trim();
+              }
+            }
 
-          parsedItems.push({
-            time: totalSeconds,
-            text,
-            translation: inlineTrans,
-            isMeta,
-            origIndex: lineCounter++,
-          });
+            const minutes = parseInt(curMatch[1], 10);
+            const seconds = parseInt(curMatch[2], 10);
+            const millis = curMatch[3] ? parseInt(curMatch[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+            const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
+
+            parsedItems.push({
+              time: totalSeconds,
+              text: partText,
+              translation: inlineTrans,
+              isMeta,
+              origIndex: lineCounter++,
+            });
+          }
         }
       }
     } else if (trimmed) {
@@ -226,9 +381,9 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     validTransLines.sort((a, b) => a.time - b.time);
 
     let matchedCount = 0;
-    const usedOriginalIndices = new Set<number>();
+    const assignedMap = new Map<number, { transTime: number; text: string; diff: number }>();
 
-    // Step 1: Best-fit timestamp matching (tolerance up to 2.2s)
+    // Step 1: Best-fit timestamp matching with parenthetical & multi-phrase merging support
     for (const transItem of validTransLines) {
       let bestIdx: number | null = null;
       let minDiff = Infinity;
@@ -236,7 +391,7 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
       for (let idx = 0; idx < parsedItems.length; idx++) {
         const item = parsedItems[idx];
         const diff = Math.abs(item.time - transItem.time);
-        const penalty = item.isMeta ? 1.0 : (usedOriginalIndices.has(idx) || item.translation ? 0.6 : 0);
+        const penalty = item.isMeta ? 1.0 : (item.translation ? 0.35 : 0);
         const adjustedDiff = diff + penalty;
 
         if (adjustedDiff < minDiff) {
@@ -247,9 +402,34 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
 
       if (bestIdx !== null && minDiff <= 2.2) {
         const target = parsedItems[bestIdx];
-        if (!target.translation || !usedOriginalIndices.has(bestIdx)) {
+        const existing = target.translation;
+
+        if (!existing) {
           target.translation = transItem.text;
-          usedOriginalIndices.add(bestIdx);
+          assignedMap.set(bestIdx, { transTime: transItem.time, text: transItem.text, diff: minDiff });
+          matchedCount++;
+        } else {
+          // Both translation fragments map to the same original lyric line
+          // e.g. [00:22.00]（可是啊） and [00:23.20]却还是不能对自己撒谎 for (だけど)でも自分に嘘はつけない
+          const prevAssigned = assignedMap.get(bestIdx);
+          const isExistingParenthetical = /^[（(【].+[）)】]$/.test(existing.trim());
+          const isNewParenthetical = /^[（(【].+[）)】]$/.test(transItem.text.trim());
+
+          if (isExistingParenthetical && !isNewParenthetical) {
+            target.translation = `${existing} ${transItem.text}`;
+          } else if (!isExistingParenthetical && isNewParenthetical) {
+            target.translation = `${transItem.text} ${existing}`;
+          } else if (prevAssigned && transItem.time > prevAssigned.transTime) {
+            if (!existing.includes(transItem.text)) {
+              target.translation = `${existing} ${transItem.text}`;
+            }
+          } else if (prevAssigned && transItem.time < prevAssigned.transTime) {
+            if (!existing.includes(transItem.text)) {
+              target.translation = `${transItem.text} ${existing}`;
+            }
+          } else if (minDiff < (prevAssigned?.diff || Infinity) - 0.5) {
+            target.translation = transItem.text;
+          }
           matchedCount++;
         }
       }
