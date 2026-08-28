@@ -91,7 +91,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const [exportScale, setExportScale] = useState<string>('16');
   const [showCoverLightbox, setShowCoverLightbox] = useState(false);
   const [customQuoteInput, setCustomQuoteInput] = useState('');
-  const [base64Cover, setBase64Cover] = useState<string>('');
 
   // Mobile Bottom Bar Active Secondary Tab
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileActiveTab>('theme');
@@ -104,48 +103,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [previewScale, setPreviewScale] = useState(1);
 
-  // Load and cache high-res image as base64 via multi-layer proxy to guarantee CORS-safe canvas export
-  const loadBase64Cover = async (coverUrl: string) => {
-    if (!coverUrl) return;
-    
-    // Set immediate direct cover first so preview renders instantly
-    setBase64Cover(coverUrl);
-
-    // Strategy 1: Local Backend Image Proxy
-    try {
-      const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(coverUrl)}`;
-      const res = await fetch(proxyUrl);
-      if (res.ok) {
-        const blob = await res.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            setBase64Cover(reader.result);
-          }
-        };
-        reader.readAsDataURL(blob);
-        return;
-      }
-    } catch {}
-
-    // Strategy 2: Global CORS Image CDN Proxy (wsrv.nl) - Works seamlessly on static custom domain deployments!
-    try {
-      const wsrvUrl = `https://wsrv.nl/?url=${encodeURIComponent(coverUrl)}&output=webp`;
-      const res = await fetch(wsrvUrl);
-      if (res.ok) {
-        const blob = await res.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            setBase64Cover(reader.result);
-          }
-        };
-        reader.readAsDataURL(blob);
-        return;
-      }
-    } catch {}
-  };
-
   // Fetch song details & lyrics
   useEffect(() => {
     if (!song) return;
@@ -156,18 +113,11 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setSelectedLines([]);
     setCustomQuoteInput('');
 
-    if (song.albumCover) {
-      loadBase64Cover(song.albumCover);
-    }
-
     const fetchLyrics = async () => {
       try {
         const data = await fetchSongDetail(song);
         if (isMounted) {
           setDetailData(data);
-          if (data.song?.albumCover && data.song.albumCover !== song.albumCover) {
-            loadBase64Cover(data.song.albumCover);
-          }
         }
       } catch (err) {
         console.error('Error fetching lyrics:', err);
@@ -235,7 +185,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
       if (resizeObserver) resizeObserver.disconnect();
       window.removeEventListener('resize', calculateScale);
     };
-  }, [posterConfig, selectedLines, loading, mobileActiveTab, base64Cover, customQuoteInput]);
+  }, [posterConfig, selectedLines, loading, mobileActiveTab, customQuoteInput]);
 
   if (!song) return null;
 
@@ -434,7 +384,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               title="点击查看高清封面"
             >
               <img
-                src={base64Cover || song.albumCover}
+                src={song.albumCover}
                 alt={song.name}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
@@ -607,7 +557,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={base64Cover}
             />
           </div>
         </div>
@@ -1465,7 +1414,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
             <div className="w-full aspect-square rounded-xl overflow-hidden shadow-lg border border-slate-700 bg-black/40">
               <img
-                src={base64Cover || song.albumCover}
+                src={song.albumCover}
                 alt={song.name}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
