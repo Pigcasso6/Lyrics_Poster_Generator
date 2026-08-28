@@ -255,7 +255,10 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     if (!coverDataUrl && song?.albumCover) {
       try {
         const b64 = await urlToBase64(song.albumCover);
-        if (b64) setCoverDataUrl(b64);
+        if (b64) {
+          setCoverDataUrl(b64);
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
       } catch (err) {
         console.warn('Pre-export cover conversion warning:', err);
       }
@@ -633,7 +636,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={song.albumCover}
+              customCoverUrl={coverDataUrl || song.albumCover}
             />
           </div>
         </div>

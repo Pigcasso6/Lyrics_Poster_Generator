@@ -92,7 +92,17 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   const cleanArtist = cleanArtistName(song.artist);
   const cleanAlbum = cleanAlbumName(song.album);
   const rawCoverSrc = customCoverUrl || song.albumCover;
-  const coverImageSrc = rawCoverSrc || generateVinylCoverSvg(cleanSongName, cleanArtist);
+
+  let coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
+  if (rawCoverSrc) {
+    if (rawCoverSrc.startsWith('data:') || rawCoverSrc.startsWith('blob:') || rawCoverSrc.startsWith('data:image/svg+xml')) {
+      coverImageSrc = rawCoverSrc;
+    } else if (rawCoverSrc.startsWith('http://') || rawCoverSrc.startsWith('https://')) {
+      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCoverSrc)}`;
+    } else {
+      coverImageSrc = rawCoverSrc;
+    }
+  }
 
   return (
     <div
