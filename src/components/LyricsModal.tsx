@@ -26,6 +26,7 @@ import { PosterPreview } from './PosterPreview';
 import { TypographyModal } from './TypographyModal';
 import { LyricPickerModal } from './LyricPickerModal';
 import { ExportScaleModal } from './ExportScaleModal';
+import { MobilePosterResultModal } from './MobilePosterResultModal';
 import { cleanAlbumName, cleanArtistName } from '../utils/cleanTitle';
 import { urlToBase64 } from '../utils/image';
 
@@ -101,6 +102,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const [showTypographyModal, setShowTypographyModal] = useState(false);
   const [showLyricPickerModal, setShowLyricPickerModal] = useState(false);
   const [exportModalType, setExportModalType] = useState<'copy' | 'download' | null>(null);
+  const [exportedResultDataUrl, setExportedResultDataUrl] = useState<string | null>(null);
 
   const posterRef = useRef<HTMLDivElement | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -304,27 +306,56 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     try {
       const targetRatio = scaleRatio || Number(exportScale) || 4;
       const dataUrl = await generatePosterImage(targetRatio);
-      const link = document.createElement('a');
-      const filename = `${song.name}-${song.artist}-歌词海报.png`.replace(/[\\/:*?"<>|]/g, '_');
-      link.download = filename;
-      link.href = dataUrl;
-      link.click();
+      const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
-      setCopyStatus('download');
-      setExportModalType(null);
-      setTimeout(() => setCopyStatus(null), 2500);
+      if (isMobile) {
+        setExportModalType(null);
+        setExportedResultDataUrl(dataUrl);
+      } else {
+        const link = document.createElement('a');
+        const filename = `${song.name}-${song.artist}-歌词海报.png`.replace(/[\\/:*?"<>|]/g, '_');
+        link.download = filename;
+        link.href = dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        setCopyStatus('download');
+        setExportModalType(null);
+        setTimeout(() => setCopyStatus(null), 2500);
+      }
     } catch (err) {
       console.error('High-res export failed, trying fallback quality:', err);
       try {
         const dataUrl = await generatePosterImage(2);
-        const link = document.createElement('a');
-        link.download = `${song.name}-歌词海报.png`;
-        link.href = dataUrl;
-        link.click();
-        setCopyStatus('download');
-        setExportModalType(null);
-        setTimeout(() => setCopyStatus(null), 2500);
-      } catch {
+        const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+
+        if (isMobile) {
+          setExportModalType(null);
+          setExportedResultDataUrl(dataUrl);
+        } else {
+          const link = document.createElement('a');
+          link.download = `${song.name}-歌词海报.png`;
+          link.href = dataUrl;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setCopyStatus('download');
+          setExportModalType(null);
+          setTimeout(() => setCopyStatus(null), 2500);
+        }
+      } catch (finalErr) {
+        console.error('Fallback export also failed:', finalErr);
+        // Fallback: try capturing canvas at current DOM scale
+        try {
+          const node = posterRef.current;
+          if (node) {
+            const fallbackDataUrl = await toPng(node, { quality: 0.95, pixelRatio: 1 });
+            setExportModalType(null);
+            setExportedResultDataUrl(fallbackDataUrl);
+            return;
+          }
+        } catch {}
         alert('海报制作失败，请重试');
       }
     } finally {
@@ -339,10 +370,21 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
     try {
       const node = posterRef.current;
+      const targetRatio = scaleRatio || Number(exportScale) || 4;
+      const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+
+      // On mobile devices, clipboard write for PNG images is restricted by WebKit/Blink security policies
+      // We directly provide the high-def result modal for seamless saving/sharing!
+      if (isMobile) {
+        const dataUrl = await generatePosterImage(targetRatio);
+        setExportModalType(null);
+        setExportedResultDataUrl(dataUrl);
+        return;
+      }
+
       const width = node.offsetWidth;
       const height = node.offsetHeight;
 
-      const targetRatio = scaleRatio || Number(exportScale) || 4;
       let blob: Blob | null = null;
       const ratiosToTry = [targetRatio, 6, 4, 3, 2].filter(
         (r, idx, arr) => arr.indexOf(r) === idx && r <= targetRatio
@@ -379,8 +421,15 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         throw new Error('Clipboard API not supported');
       }
     } catch (err) {
-      console.error('Copy poster failed, falling back to download:', err);
-      handleDownloadPoster(scaleRatio);
+      console.error('Copy poster failed, falling back to result preview:', err);
+      try {
+        const targetRatio = scaleRatio || Number(exportScale) || 4;
+        const dataUrl = await generatePosterImage(targetRatio);
+        setExportModalType(null);
+        setExportedResultDataUrl(dataUrl);
+      } catch {
+        handleDownloadPoster(scaleRatio);
+      }
     } finally {
       setIsExporting(false);
     }
@@ -1480,6 +1529,16 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 5. Mobile Poster Result Modal (Long-press save, Share, Download) */}
+      {exportedResultDataUrl && (
+        <MobilePosterResultModal
+          imageDataUrl={exportedResultDataUrl}
+          songName={song.name}
+          artistName={song.artist}
+          onClose={() => setExportedResultDataUrl(null)}
+        />
       )}
     </div>
   );

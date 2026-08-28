@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Image as ImageIcon, Disc } from 'lucide-react';
 import { Song } from '../types';
+import { generateVinylCoverSvg } from '../utils/cover';
 
 interface SongCardProps {
   song: Song;
@@ -11,9 +12,9 @@ interface SongCardProps {
 export const SongCard: React.FC<SongCardProps> = ({ song, onSelect, isSelected }) => {
   const [imgError, setImgError] = useState(false);
 
-  // Fallback image if cover fails
+  // Fallback vinyl image if cover fails
   const coverSrc = imgError || !song.albumCover
-    ? 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&auto=format&fit=crop&q=80'
+    ? generateVinylCoverSvg(song.name, song.artist)
     : song.albumCover;
 
   return (

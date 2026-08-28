@@ -1,6 +1,7 @@
 import React from 'react';
 import { Song, LyricLine, PosterConfig, PosterTheme, PosterFont } from '../types';
 import { cleanPosterSongTitle, cleanArtistName, cleanAlbumName } from '../utils/cleanTitle';
+import { generateVinylCoverSvg } from '../utils/cover';
 
 export const FONT_FAMILY_MAP: Record<string, string> = {
   'noto-sans-sc': '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
@@ -87,10 +88,11 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
     }
   };
 
-  const coverImageSrc = customCoverUrl || song.albumCover;
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
   const cleanAlbum = cleanAlbumName(song.album);
+  const rawCoverSrc = customCoverUrl || song.albumCover;
+  const coverImageSrc = rawCoverSrc || generateVinylCoverSvg(cleanSongName, cleanArtist);
 
   return (
     <div
@@ -130,12 +132,17 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               src={coverImageSrc}
               alt={cleanSongName}
               referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
               className="w-full h-full object-cover block"
               onError={(e) => {
                 const target = e.currentTarget;
-                if (!target.dataset.fallbackApplied) {
-                  target.dataset.fallbackApplied = 'true';
-                  target.src = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
+                const stage = Number(target.dataset.fallbackStage || '0');
+                if (stage === 0 && rawCoverSrc && !rawCoverSrc.startsWith('data:') && !rawCoverSrc.includes('/api/music/proxy-image')) {
+                  target.dataset.fallbackStage = '1';
+                  target.src = `/api/music/proxy-image?url=${encodeURIComponent(rawCoverSrc)}`;
+                } else if (stage < 2) {
+                  target.dataset.fallbackStage = '2';
+                  target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
                 }
               }}
             />

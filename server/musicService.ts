@@ -495,8 +495,8 @@ const POPULAR_SONG_DB: Array<{
     album: '叶惠美',
     duration: 269,
     releaseDate: '2003-07-31',
-    neteaseCover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/4V_eM8n6D5P7g2c-q-2h4g==/109951165434771490.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000000MkCQg0ZdRoK.jpg',
     audioPreview: 'https://actions.google.com/sounds/v1/ambiences/rain_heavy.ogg',
     lrc: `[00:00.00]晴天 - 周杰伦
 [00:04.00]词：周杰伦 曲：周杰伦
@@ -526,8 +526,8 @@ const POPULAR_SONG_DB: Array<{
     album: '七里香',
     duration: 299,
     releaseDate: '2004-08-03',
-    neteaseCover: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/cW3E4vP-Mh7b6m9Q6g5_8A==/109951165434778170.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000003bviTG4L24vd.jpg',
     lrc: `[00:00.00]七里香 - 周杰伦
 [00:03.00]词：方文山 曲：周杰伦
 [00:24.00]窗外的麻雀 在电线杆上多嘴
@@ -554,8 +554,8 @@ const POPULAR_SONG_DB: Array<{
     album: '孤勇者',
     duration: 256,
     releaseDate: '2021-11-08',
-    neteaseCover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/aG5dp9ydnCqb8bm5kfqlIQ==/109951166594248554.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000002BwYqP1hGj1y.jpg',
     lrc: `[00:00.00]孤勇者 - 陈奕迅
 [00:03.00]《英雄联盟：双城之战》动画中文主题曲
 [00:06.00]词：唐恬 曲：钱雷
@@ -584,8 +584,8 @@ const POPULAR_SONG_DB: Array<{
     album: '命运派对',
     duration: 302,
     releaseDate: '1990-09-01',
-    neteaseCover: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/k4R5iYpG7k7q7l5w1v-u_Q==/109951163108994511.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000001fP2XG3aQ1aO.jpg',
     lrc: `[00:00.00]光辉岁月 - Beyond
 [00:03.00]词：黄家驹 曲：黄家驹
 [00:30.00]钟声提及了回家 讯息在漫长路
@@ -608,8 +608,8 @@ const POPULAR_SONG_DB: Array<{
     album: '纵横四海',
     duration: 219,
     releaseDate: '2022-12-21',
-    neteaseCover: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/G1a8rC7r3e2f5g6h7i8j9k==/109951168160492837.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000000m9r2N1m1Z2o.jpg',
     lrc: `[00:00.00]乌梅子酱 - 李荣浩
 [00:03.00]词：李荣浩 曲：李荣浩
 [00:16.00]背靠在树枝上 听风吹过声响
@@ -628,8 +628,8 @@ const POPULAR_SONG_DB: Array<{
     album: '热门单曲',
     duration: 188,
     releaseDate: '2023-01-10',
-    neteaseCover: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/v7_3b9n1q5r8s2t4u6v8w==/109951166627889123.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M0000049C57y0H8FqD.jpg',
     lrc: `[00:00.00]爱如火
 [00:04.00]心在跳 是爱情如烈火
 [00:08.00]你在笑 疯狂的人是我
@@ -647,8 +647,8 @@ const POPULAR_SONG_DB: Array<{
     album: '1st.星球',
     duration: 278,
     releaseDate: '2020-06-15',
-    neteaseCover: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-    qqCover: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&auto=format&fit=crop&q=80',
+    neteaseCover: 'https://p1.music.126.net/v7_3b9n1q5r8s2t4u6v8w==/109951166627889123.jpg?param=500y500',
+    qqCover: 'https://y.gtimg.cn/music/photo_new/T002R500x500M0000049C57y0H8FqD.jpg',
     lrc: `[00:00.00]漠河舞厅 - 柳爽
 [00:03.00]词：柳爽 曲：柳爽
 [00:22.00]我从没有见过极光出现的村落
@@ -936,9 +936,15 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
           const artistName = cleanArtist(rawArtistName);
           const albumName = s.albumname || '单曲';
           const albumMid = s.albummid || '';
-          const albumPic = albumMid
-            ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
-            : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
+          const singerMid = s.singermid || s.singer?.[0]?.mid || '';
+          let albumPic = '';
+          if (albumMid && albumMid !== '00000000000000' && albumMid !== '0') {
+            albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`;
+          } else if (singerMid) {
+            albumPic = `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg`;
+          } else {
+            albumPic = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${s.songmid || s.songid}`;
+          }
 
           songs.push({
             id: String(s.songid || s.songmid),
@@ -984,9 +990,15 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
             const artistName = cleanArtist(rawArtistName);
             const albumName = s.albumname || '单曲';
             const albumMid = s.albummid || '';
-            const albumPic = albumMid
-              ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
-              : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
+            const singerMid = s.singermid || s.singer?.[0]?.mid || '';
+            let albumPic = '';
+            if (albumMid && albumMid !== '00000000000000' && albumMid !== '0') {
+              albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`;
+            } else if (singerMid) {
+              albumPic = `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg`;
+            } else {
+              albumPic = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${s.songmid || s.songid}`;
+            }
 
             songs.push({
               id: String(s.songid || s.songmid),
@@ -1026,6 +1038,7 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
       const songItems = data?.data?.song?.itemlist;
       if (Array.isArray(songItems) && songItems.length > 0) {
         for (const s of songItems) {
+          const songId = s.mid || s.id;
           songs.push({
             id: String(s.id || s.mid),
             songMid: s.mid,
@@ -1033,7 +1046,7 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
             name: s.name || keyword,
             artist: cleanArtist(s.singer || '未知歌手'),
             album: '精选单曲',
-            albumCover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
+            albumCover: `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${songId}`,
             duration: 240,
             url: `https://y.qq.com/n/ryqq/songDetail/${s.mid || s.id}`,
           });
@@ -1485,6 +1498,10 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
     } catch (e) {
       console.warn('Server cross-platform translation fallback failed:', e);
     }
+  }
+
+  if (!albumCover && targetMid) {
+    albumCover = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${targetMid}`;
   }
 
   const parsed = parseLrc(rawLyric, rawTLyric);

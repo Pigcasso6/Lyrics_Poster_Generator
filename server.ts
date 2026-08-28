@@ -108,16 +108,27 @@ async function startServer() {
       return res.status(400).send('Missing image url');
     }
     try {
-      const isQQ = imageUrl.includes('qq.com') || imageUrl.includes('gtimg.cn');
-      const response = await fetch(imageUrl, {
+      let targetUrl = imageUrl;
+      if (targetUrl.startsWith('http://')) {
+        targetUrl = targetUrl.replace('http://', 'https://');
+      }
+
+      const isQQ = targetUrl.includes('qq.com') || targetUrl.includes('gtimg.cn');
+      const response = await fetch(targetUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Referer': isQQ ? 'https://y.qq.com/' : 'https://music.163.com/',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
         },
       });
 
       if (!response.ok) {
-        return res.status(response.status).send('Failed to fetch remote image');
+        // Return placeholder svg instead of breaking
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500"><rect width="500" height="500" fill="#0f172a"/><circle cx="250" cy="250" r="180" fill="#1e293b"/><circle cx="250" cy="250" r="90" fill="#0284c7"/><circle cx="250" cy="250" r="24" fill="#0f172a"/></svg>`;
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        return res.send(svg);
       }
 
       const contentType = response.headers.get('content-type') || 'image/jpeg';
@@ -125,11 +136,17 @@ async function startServer() {
 
       res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       res.send(Buffer.from(arrayBuf));
     } catch (err: any) {
       console.error('Image proxy error:', err);
-      res.status(500).send(err.message || 'Proxy error');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500"><rect width="500" height="500" fill="#0f172a"/><circle cx="250" cy="250" r="180" fill="#1e293b"/><circle cx="250" cy="250" r="90" fill="#0284c7"/><circle cx="250" cy="250" r="24" fill="#0f172a"/></svg>`;
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.send(svg);
     }
   });
 
