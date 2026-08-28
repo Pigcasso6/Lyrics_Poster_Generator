@@ -27,6 +27,7 @@ import { TypographyModal } from './TypographyModal';
 import { LyricPickerModal } from './LyricPickerModal';
 import { ExportScaleModal } from './ExportScaleModal';
 import { cleanAlbumName, cleanArtistName } from '../utils/cleanTitle';
+import { urlToBase64 } from '../utils/image';
 
 interface LyricsModalProps {
   song: Song | null;
@@ -39,10 +40,10 @@ const DEFAULT_POSTER_CONFIG: PosterConfig = {
   fontSize: 'md',
   lyricAlign: 'center',
   infoAlign: 'left',
-  lyricFont: 'noto-sans-cn',
-  translationFont: 'noto-sans-cn',
-  quoteFont: 'noto-sans-cn',
-  infoFont: 'noto-sans-cn',
+  lyricFont: 'noto-sans-sc',
+  translationFont: 'noto-sans-sc',
+  quoteFont: 'noto-sans-sc',
+  infoFont: 'noto-sans-sc',
   quoteStyle: 'curly',
   lyricBold: true,
   lyricItalic: false,
@@ -69,13 +70,14 @@ const THEMES: Array<{ id: PosterTheme; name: string; color: string }> = [
 ];
 
 const FONT_OPTIONS: Array<{ id: PosterFont; name: string }> = [
-  { id: 'noto-sans-cn', name: 'Noto Sans CN' },
-  { id: 'noto-sans-tw', name: 'Noto Sans TW' },
+  { id: 'noto-sans-sc', name: 'Noto Sans SC' },
+  { id: 'noto-sans-tc', name: 'Noto Sans TC' },
   { id: 'noto-sans-jp', name: 'Noto Sans JP' },
   { id: 'yu-mincho', name: 'Yu Mincho' },
   { id: 'yu-gothic', name: 'Yu Gothic' },
   { id: 'songti', name: '宋体' },
   { id: 'heiti', name: '黑体' },
+  { id: 'times-new-roman', name: 'Times New Roman' },
 ];
 
 type MobileActiveTab = 'theme' | 'ratio' | 'fontSize' | 'toggles' | 'quote';
@@ -88,9 +90,10 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const [posterConfig, setPosterConfig] = useState<PosterConfig>(DEFAULT_POSTER_CONFIG);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-  const [exportScale, setExportScale] = useState<string>('16');
+  const [exportScale, setExportScale] = useState<string>('4');
   const [showCoverLightbox, setShowCoverLightbox] = useState(false);
   const [customQuoteInput, setCustomQuoteInput] = useState('');
+  const [coverDataUrl, setCoverDataUrl] = useState<string>('');
 
   // Mobile Bottom Bar Active Secondary Tab
   const [mobileActiveTab, setMobileActiveTab] = useState<MobileActiveTab>('theme');
@@ -103,21 +106,50 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [previewScale, setPreviewScale] = useState(1);
 
-  // Fetch song details & lyrics
+  // Lock main page scrolling when modal is open
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, []);
+
+  // Fetch song details & lyrics and convert album cover
   useEffect(() => {
     if (!song) return;
 
     let isMounted = true;
     setLoading(true);
-    // Default not selecting any lyrics
     setSelectedLines([]);
     setCustomQuoteInput('');
+    setCoverDataUrl('');
+
+    // Pre-convert album artwork into Base64 data URL
+    if (song.albumCover) {
+      urlToBase64(song.albumCover).then((b64) => {
+        if (isMounted && b64) {
+          setCoverDataUrl(b64);
+        }
+      });
+    }
 
     const fetchLyrics = async () => {
       try {
         const data = await fetchSongDetail(song);
         if (isMounted) {
           setDetailData(data);
+          if (data.song?.albumCover && !coverDataUrl) {
+            urlToBase64(data.song.albumCover).then((b64) => {
+              if (isMounted && b64) {
+                setCoverDataUrl(b64);
+              }
+            });
+          }
         }
       } catch (err) {
         console.error('Error fetching lyrics:', err);
@@ -212,27 +244,38 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setSelectedLines([]);
   };
 
-  // Helper to generate clean image with customizable sampling multiplier (2x to 64x)
-  const generatePosterImage = async (targetPixelRatio = 16) => {
+  // Helper to generate clean image with customizable sampling multiplier (2x to 8x)
+  const generatePosterImage = async (targetPixelRatio = 4) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
+
+    // Ensure cover is converted to Base64 to prevent CORS taint
+    if (!coverDataUrl && song?.albumCover) {
+      try {
+        const b64 = await urlToBase64(song.albumCover);
+        if (b64) setCoverDataUrl(b64);
+      } catch (err) {
+        console.warn('Pre-export cover conversion warning:', err);
+      }
+    }
 
     const width = node.offsetWidth;
     const height = node.offsetHeight;
 
-    const clampedRatio = Math.min(64, Math.max(2, targetPixelRatio));
+    const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
 
-    // Try target down through progressive fallback levels in case browser canvas dimension limits are reached
-    const ratiosToTry = [clampedRatio, 32, 16, 8, 4, 2].filter(
+    // Try target down through progressive fallback levels
+    const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
       (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
     );
 
     for (const ratio of ratiosToTry) {
       try {
         const dataUrl = await toPng(node, {
-          quality: 1,
+          quality: 0.98,
           pixelRatio: ratio,
-          cacheBust: true,
+          cacheBust: false,
+          skipFonts: true,
           width,
           height,
           canvasWidth: width * ratio,
@@ -259,7 +302,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setIsExporting(true);
 
     try {
-      const targetRatio = scaleRatio || Number(exportScale) || 16;
+      const targetRatio = scaleRatio || Number(exportScale) || 4;
       const dataUrl = await generatePosterImage(targetRatio);
       const link = document.createElement('a');
       const filename = `${song.name}-${song.artist}-歌词海报.png`.replace(/[\\/:*?"<>|]/g, '_');
@@ -273,7 +316,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     } catch (err) {
       console.error('High-res export failed, trying fallback quality:', err);
       try {
-        const dataUrl = await generatePosterImage(4);
+        const dataUrl = await generatePosterImage(2);
         const link = document.createElement('a');
         link.download = `${song.name}-歌词海报.png`;
         link.href = dataUrl;
@@ -282,7 +325,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         setExportModalType(null);
         setTimeout(() => setCopyStatus(null), 2500);
       } catch {
-        alert('海报生成失败，请重试');
+        alert('海报制作失败，请重试');
       }
     } finally {
       setIsExporting(false);
@@ -299,16 +342,17 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
       const width = node.offsetWidth;
       const height = node.offsetHeight;
 
-      const targetRatio = scaleRatio || Number(exportScale) || 16;
+      const targetRatio = scaleRatio || Number(exportScale) || 4;
       let blob: Blob | null = null;
-      const ratiosToTry = [targetRatio, 32, 16, 8, 4, 2].filter(
+      const ratiosToTry = [targetRatio, 6, 4, 3, 2].filter(
         (r, idx, arr) => arr.indexOf(r) === idx && r <= targetRatio
       );
       for (const ratio of ratiosToTry) {
         try {
           blob = await toBlob(node, {
             pixelRatio: ratio,
-            cacheBust: true,
+            cacheBust: false,
+            skipFonts: true,
             width,
             height,
             canvasWidth: width * ratio,
@@ -335,7 +379,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         throw new Error('Clipboard API not supported');
       }
     } catch (err) {
-      console.error('Copy poster failed:', err);
+      console.error('Copy poster failed, falling back to download:', err);
       handleDownloadPoster(scaleRatio);
     } finally {
       setIsExporting(false);
@@ -421,11 +465,11 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               }}
               onBlur={() => {
                 if (!exportScale || exportScale.trim() === '') {
-                  setExportScale('16');
+                  setExportScale('4');
                 } else {
                   const val = parseInt(exportScale, 10);
                   if (val < 2) setExportScale('2');
-                  else if (val > 64) setExportScale('64');
+                  else if (val > 8) setExportScale('8');
                   else setExportScale(String(val));
                 }
               }}
@@ -557,6 +601,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
+              customCoverUrl={coverDataUrl}
             />
           </div>
         </div>
@@ -1385,7 +1430,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
       {exportModalType && (
         <ExportScaleModal
           type={exportModalType}
-          initialScale={Number(exportScale) || 16}
+          initialScale={Number(exportScale) || 4}
           isExporting={isExporting}
           onConfirm={(scale) => {
             setExportScale(String(scale));

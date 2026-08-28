@@ -16,8 +16,8 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
   onConfirm,
   onClose,
 }) => {
-  const [scale, setScale] = useState<number>(initialScale || 16);
-  const [scaleInput, setScaleInput] = useState<string>(String(initialScale || 16));
+  const [scale, setScale] = useState<number>(initialScale || 4);
+  const [scaleInput, setScaleInput] = useState<string>(String(initialScale || 4));
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
@@ -30,17 +30,17 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
     setScaleInput(digits);
     if (digits) {
       const val = parseInt(digits, 10);
-      setScale(Math.min(64, Math.max(2, val)));
+      setScale(Math.min(8, Math.max(2, val)));
     }
   };
 
   const handleInputBlur = () => {
     if (!scaleInput || scaleInput.trim() === '') {
-      setScale(16);
-      setScaleInput('16');
+      setScale(4);
+      setScaleInput('4');
     } else {
       const val = parseInt(scaleInput, 10);
-      const clamped = Math.min(64, Math.max(2, val));
+      const clamped = Math.min(8, Math.max(2, val));
       setScale(clamped);
       setScaleInput(String(clamped));
     }
@@ -64,7 +64,7 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
               <h3 className="text-sm font-bold text-white">
                 {type === 'copy' ? '复制歌词海报' : '保存歌词海报'}
               </h3>
-              <p className="text-[11px] text-slate-400">选择导出图像采样倍率</p>
+              <p className="text-[11px] text-slate-400">选择导出图像采样倍率（2x - 8x）</p>
             </div>
           </div>
           <button
@@ -84,7 +84,13 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
             <div>
               <span className="text-xs text-slate-400 font-medium">当前采样倍率</span>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                {scale >= 32 ? '超高精细度（文件较大）' : scale >= 16 ? '高清标准（推荐）' : '普通标清'}
+                {scale >= 8
+                  ? '超高精细度（8x 超清）'
+                  : scale >= 6
+                  ? '超清高精（6x 推荐）'
+                  : scale >= 4
+                  ? '高清标准（4x 推荐）'
+                  : '标清快速（2x 快速）'}
               </div>
             </div>
 
@@ -105,12 +111,12 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span>2x（快速）</span>
-              <span>64x（超清）</span>
+              <span>8x（超清）</span>
             </div>
             <input
               type="range"
               min={2}
-              max={64}
+              max={8}
               step={1}
               value={scale}
               onChange={handleSliderChange}
@@ -122,7 +128,7 @@ export const ExportScaleModal: React.FC<ExportScaleModalProps> = ({
           <div className="space-y-1.5">
             <span className="text-[11px] text-slate-400 font-medium">常用预设</span>
             <div className="grid grid-cols-4 gap-2">
-              {[4, 8, 16, 32].map((preset) => (
+              {[2, 4, 6, 8].map((preset) => (
                 <button
                   key={preset}
                   type="button"

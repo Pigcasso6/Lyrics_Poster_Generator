@@ -136,7 +136,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block shrink-0"></span>
             <span className="truncate">QQ音乐</span>
             {qqCount > 0 && (
-              <span className="text-xs px-1.5 py-0.2 bg-emerald-50 text-emerald-600 rounded-full font-mono shrink-0">
+              <span
+                style={{ fontFamily: '"Noto Sans SC", sans-serif' }}
+                className="text-xs px-1.5 py-0.2 bg-emerald-50 text-emerald-600 rounded-full font-medium shrink-0"
+              >
                 {qqCount}
               </span>
             )}
@@ -156,7 +159,10 @@ export const SearchBar: React.FC<SearchBarProps> = ({
             <span className="w-2 h-2 rounded-full bg-red-500 inline-block shrink-0"></span>
             <span className="truncate">网易云音乐</span>
             {neteaseCount > 0 && (
-              <span className="text-xs px-1.5 py-0.2 bg-red-50 text-red-600 rounded-full font-mono shrink-0">
+              <span
+                style={{ fontFamily: '"Noto Sans SC", sans-serif' }}
+                className="text-xs px-1.5 py-0.2 bg-red-50 text-red-600 rounded-full font-medium shrink-0"
+              >
                 {neteaseCount}
               </span>
             )}

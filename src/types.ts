@@ -47,13 +47,16 @@ export type PosterTheme =
   | 'cyber-neon';
 
 export type PosterFont =
-  | 'noto-sans-cn'
-  | 'noto-sans-tw'
+  | 'noto-sans-sc'
+  | 'noto-sans-tc'
   | 'noto-sans-jp'
   | 'yu-mincho'
   | 'yu-gothic'
   | 'songti'
-  | 'heiti';
+  | 'heiti'
+  | 'times-new-roman'
+  | 'noto-sans-cn'
+  | 'noto-sans-tw';
 
 export type QuoteStyle = 'curly' | 'corner';
 

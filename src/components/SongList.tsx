@@ -88,7 +88,12 @@ export const SongList: React.FC<SongListProps> = ({
             }`}
           ></span>
           {activePlatform === 'qq' ? 'QQ音乐' : '网易云音乐'}
-          <span className="text-slate-400 font-normal">（{songs.length} 首）</span>
+          <span
+            style={{ fontFamily: '"Noto Sans SC", sans-serif' }}
+            className="text-slate-400 font-normal text-xs"
+          >
+            （{songs.length} 首）
+          </span>
         </h3>
       </div>
 

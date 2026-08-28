@@ -2,14 +2,18 @@ import React from 'react';
 import { Song, LyricLine, PosterConfig, PosterTheme, PosterFont } from '../types';
 import { cleanPosterSongTitle, cleanArtistName, cleanAlbumName } from '../utils/cleanTitle';
 
-export const FONT_FAMILY_MAP: Record<PosterFont, string> = {
-  'noto-sans-cn': '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
-  'noto-sans-tw': '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif',
+export const FONT_FAMILY_MAP: Record<string, string> = {
+  'noto-sans-sc': '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
+  'noto-sans-tc': '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif',
   'noto-sans-jp': '"Noto Sans JP", "Hiragino Sans", "Meiryo", sans-serif',
   'yu-mincho': '"Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Shippori Mincho", "Noto Serif JP", serif',
   'yu-gothic': '"Yu Gothic", "YuGothic", "Hiragino Kaku Gothic ProN", "Zen Kaku Gothic New", "Noto Sans JP", sans-serif',
   'songti': '"Noto Serif SC", "Songti SC", "SimSun", "STSong", "Songti", serif',
   'heiti': '"SimHei", "STHeiti", "Heiti SC", "PingFang SC", "Noto Sans SC", sans-serif',
+  'times-new-roman': '"Times New Roman", Times, "Noto Serif SC", "Songti SC", serif',
+  // Backward compatibility aliases
+  'noto-sans-cn': '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Heiti SC", sans-serif',
+  'noto-sans-tw': '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif',
 };
 
 interface PosterPreviewProps {
@@ -53,10 +57,10 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   const lyricAlign = config.lyricAlign || config.textAlign || 'center';
   const infoAlign = config.infoAlign || config.textAlign || 'left';
 
-  const lyricFontStyle = { fontFamily: FONT_FAMILY_MAP[config.lyricFont || 'noto-sans-cn'] };
-  const transFontStyle = { fontFamily: FONT_FAMILY_MAP[config.translationFont || config.lyricFont || 'noto-sans-cn'] };
-  const quoteFontStyle = { fontFamily: FONT_FAMILY_MAP[config.quoteFont || 'noto-sans-cn'] };
-  const infoFontStyle = { fontFamily: FONT_FAMILY_MAP[config.infoFont || 'noto-sans-cn'] };
+  const lyricFontStyle = { fontFamily: FONT_FAMILY_MAP[config.lyricFont || 'noto-sans-sc'] || FONT_FAMILY_MAP['noto-sans-sc'] };
+  const transFontStyle = { fontFamily: FONT_FAMILY_MAP[config.translationFont || config.lyricFont || 'noto-sans-sc'] || FONT_FAMILY_MAP['noto-sans-sc'] };
+  const quoteFontStyle = { fontFamily: FONT_FAMILY_MAP[config.quoteFont || 'noto-sans-sc'] || FONT_FAMILY_MAP['noto-sans-sc'] };
+  const infoFontStyle = { fontFamily: FONT_FAMILY_MAP[config.infoFont || 'noto-sans-sc'] || FONT_FAMILY_MAP['noto-sans-sc'] };
 
   const quoteOpen = config.quoteStyle === 'corner' ? '「' : '“';
   const quoteClose = config.quoteStyle === 'corner' ? '」' : '”';
@@ -194,7 +198,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
           </div>
         ) : (
           <div className="w-full text-center py-4 border border-dashed border-current/25 opacity-60">
-            <p className="text-xs" style={{ fontFamily: FONT_FAMILY_MAP['noto-sans-cn'] }}>
+            <p className="text-xs" style={{ fontFamily: FONT_FAMILY_MAP['noto-sans-sc'] }}>
               点击右侧歌词，挑选想要印在海报上的歌词
             </p>
           </div>
