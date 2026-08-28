@@ -95,8 +95,11 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   let coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
   if (rawCoverSrc) {
-    if (rawCoverSrc.startsWith('http://')) {
-      coverImageSrc = rawCoverSrc.replace(/^http:\/\//i, 'https://');
+    if (rawCoverSrc.startsWith('data:') || rawCoverSrc.startsWith('blob:')) {
+      coverImageSrc = rawCoverSrc;
+    } else if (rawCoverSrc.startsWith('http://') || rawCoverSrc.startsWith('https://')) {
+      const cleanUrl = rawCoverSrc.replace(/^http:\/\//i, 'https://');
+      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
     } else {
       coverImageSrc = rawCoverSrc;
     }
@@ -143,7 +146,12 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               className="w-full h-full object-cover block"
               onError={(e) => {
                 const target = e.currentTarget;
-                target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
+                const directUrl = rawCoverSrc ? rawCoverSrc.replace(/^http:\/\//i, 'https://') : '';
+                if (directUrl && target.src !== directUrl) {
+                  target.src = directUrl;
+                } else {
+                  target.src = generateVinylCoverSvg(cleanSongName, cleanArtist);
+                }
               }}
             />
           </div>

@@ -124,15 +124,34 @@ async function startServer() {
         targetUrl = targetUrl.replace('http://', 'https://');
       }
 
-      const isQQ = targetUrl.includes('qq.com') || targetUrl.includes('gtimg.cn');
+      const isQQ = targetUrl.includes('qq.com') || targetUrl.includes('gtimg.cn') || targetUrl.includes('qpic.cn');
       const isMeting = targetUrl.includes('i-meto.com');
-      const response = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Referer': isQQ ? 'https://y.qq.com/' : isMeting ? 'https://i-meto.com/' : 'https://music.163.com/',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        },
-      });
+      const isNetease = targetUrl.includes('126.net') || targetUrl.includes('163.com');
+
+      const headers: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      };
+
+      if (isQQ) {
+        headers['Referer'] = 'https://y.qq.com/';
+      } else if (isMeting) {
+        headers['Referer'] = 'https://i-meto.com/';
+      } else if (isNetease) {
+        headers['Referer'] = 'https://music.163.com/';
+      }
+
+      let response = await fetch(targetUrl, { headers });
+
+      if (!response.ok && targetUrl.startsWith('https://')) {
+        const httpUrl = targetUrl.replace('https://', 'http://');
+        try {
+          const res2 = await fetch(httpUrl, { headers });
+          if (res2.ok) {
+            response = res2;
+          }
+        } catch (e) {}
+      }
 
       if (!response.ok) {
         console.error(`Proxy fetch failed (${response.status}) for URL: ${targetUrl}`);

@@ -229,77 +229,47 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setSelectedLines([]);
   };
 
-  const [exportCoverDataUrl, setExportCoverDataUrl] = useState<string | null>(null);
-
   // Helper to generate clean image with customizable sampling multiplier (2x to 8x)
   const generatePosterImage = async (targetPixelRatio = 4) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
-    // Pre-fetch real cover as Base64 Data URL to guarantee cross-origin security during toPng
-    if (song?.albumCover && !song.albumCover.startsWith('data:')) {
+    const width = node.offsetWidth;
+    const height = node.offsetHeight;
+
+    const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
+
+    // Try target down through progressive fallback levels
+    const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
+      (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
+    );
+
+    for (const ratio of ratiosToTry) {
       try {
-        const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(song.albumCover)}`;
-        const res = await fetch(proxyUrl);
-        if (res.ok) {
-          const blob = await res.blob();
-          const b64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          if (b64 && b64.startsWith('data:image')) {
-            setExportCoverDataUrl(b64);
-            // Give React DOM time to update <img> src to b64
-            await new Promise((resolve) => setTimeout(resolve, 80));
-          }
-        }
-      } catch (err) {
-        console.warn('Pre-fetch cover for export warning:', err);
+        const dataUrl = await toPng(node, {
+          quality: 0.98,
+          pixelRatio: ratio,
+          cacheBust: false,
+          skipFonts: true,
+          imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
+          width,
+          height,
+          canvasWidth: width * ratio,
+          canvasHeight: height * ratio,
+          style: {
+            margin: '0',
+            transform: 'none',
+            left: '0',
+            top: '0',
+            position: 'static',
+          },
+        });
+        if (dataUrl) return dataUrl;
+      } catch (e) {
+        console.warn(`Export attempt with pixelRatio=${ratio} failed, trying next resolution level...`, e);
       }
     }
-
-    try {
-      const width = node.offsetWidth;
-      const height = node.offsetHeight;
-
-      const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
-
-      // Try target down through progressive fallback levels
-      const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
-        (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
-      );
-
-      for (const ratio of ratiosToTry) {
-        try {
-          const dataUrl = await toPng(node, {
-            quality: 0.98,
-            pixelRatio: ratio,
-            cacheBust: false,
-            skipFonts: true,
-            imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
-            width,
-            height,
-            canvasWidth: width * ratio,
-            canvasHeight: height * ratio,
-            style: {
-              margin: '0',
-              transform: 'none',
-              left: '0',
-              top: '0',
-              position: 'static',
-            },
-          });
-          if (dataUrl) return dataUrl;
-        } catch (e) {
-          console.warn(`Export attempt with pixelRatio=${ratio} failed, trying next resolution level...`, e);
-        }
-      }
-      throw new Error('Failed to generate image across all resolution attempts');
-    } finally {
-      setExportCoverDataUrl(null);
-    }
+    throw new Error('Failed to generate image across all resolution attempts');
   };
 
   // Export Poster as PNG image
@@ -637,7 +607,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               selectedLyrics={selectedLines}
               config={posterConfig}
               previewRef={posterRef}
-              customCoverUrl={exportCoverDataUrl || song.albumCover}
+              customCoverUrl={song.albumCover}
             />
           </div>
         </div>
