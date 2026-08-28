@@ -985,7 +985,7 @@ export async function getNeteaseDetail(id: string, songName?: string, lrcUrl?: s
 }
 
 // Fetch QQ Music Song Lyrics & Details
-export async function getQQDetail(id: string, songMid?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
+export async function getQQDetail(id: string, songMid?: string, songName?: string, artist?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
   let rawLyric = '';
   let rawTLyric = '';
   let albumCover = '';
@@ -1168,6 +1168,23 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
     if (fallback) {
       rawLyric = fallback.lrc;
       rawTLyric = fallback.tlyric || '';
+    }
+  }
+
+  // Cross-platform translation fallback if rawTLyric is missing
+  if (!rawTLyric && rawLyric && (songName || artist)) {
+    const query = [songName, artist].filter(Boolean).join(' ');
+    try {
+      const neteaseData = await searchNeteaseMusic(query);
+      if (neteaseData.length > 0) {
+        const topSong = neteaseData[0];
+        const neteaseDetail = await getNeteaseDetail(topSong.id, topSong.name);
+        if (neteaseDetail.rawTLyric && neteaseDetail.rawTLyric.includes('[')) {
+          rawTLyric = neteaseDetail.rawTLyric;
+        }
+      }
+    } catch (e) {
+      console.warn('Server cross-platform translation fallback failed:', e);
     }
   }
 

@@ -18,7 +18,20 @@ function cleanArtist(name: string): string {
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#(\d+);/g, (_, dec) => {
+      try {
+        return String.fromCodePoint(parseInt(dec, 10));
+      } catch {
+        return String.fromCharCode(parseInt(dec, 10));
+      }
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      try {
+        return String.fromCodePoint(parseInt(hex, 16));
+      } catch {
+        return String.fromCharCode(parseInt(hex, 16));
+      }
+    })
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -52,6 +65,23 @@ function safeBase64Decode(str: string): string {
   }
 }
 
+/**
+ * Decode QQ Lyric String (handles base64, hex entities, decimal entities)
+ */
+function decodeQQLyricString(raw: string): string {
+  if (!raw) return '';
+  let str = raw.trim();
+  str = decodeHtmlEntities(str);
+  if (!str.includes('[') && !str.includes('\n')) {
+    const decoded = safeBase64Decode(str);
+    if (decoded && (decoded.includes('[') || decoded.includes('\n') || decoded.includes('&#'))) {
+      str = decoded;
+    }
+  }
+  str = decodeHtmlEntities(str);
+  return str;
+}
+
 // Client-side LRC Parser with robust translation alignment
 export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
   if (!lrcText) return [];
@@ -66,11 +96,22 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     if (!trimmed || /^\[(ti|ar|al|by|offset|kana):/i.test(trimmed)) continue;
 
     const matches = [...trimmed.matchAll(timeRegex)];
-    const text = trimmed.replace(timeRegex, '').trim();
+    let text = trimmed.replace(timeRegex, '').trim();
 
     if (matches.length > 0) {
       if (text) {
         const isMeta = /^(作词|作曲|编曲|制作人|监制|混音|母带|吉他|贝斯|鼓|键盘|和声|录音|发行|出品|词|曲|arranger|producer|lyricist|composer)\s*[:：]/i.test(text);
+
+        // Check if the line has inline translation in parentheses, e.g. "Never gonna give you up (决不会放弃你)"
+        let inlineTrans: string | undefined = undefined;
+        if (!isMeta) {
+          const inlineMatch = text.match(/^(.+?)\s*[（(【]([\u4e00-\u9fa5\s，。！？、…]+)[）)】]$/);
+          if (inlineMatch && /[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/.test(inlineMatch[1])) {
+            text = inlineMatch[1].trim();
+            inlineTrans = inlineMatch[2].trim();
+          }
+        }
+
         for (const match of matches) {
           const minutes = parseInt(match[1], 10);
           const seconds = parseInt(match[2], 10);
@@ -90,7 +131,20 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
               parsedMap.set(totalSeconds, { text, isMeta });
             }
           } else {
-            parsedMap.set(totalSeconds, { text, isMeta });
+            // Check if there is a very close timestamp (within 0.5s) that is foreign while this is Chinese
+            let mergedWithClose = false;
+            if (/[\u4e00-\u9fa5]/.test(text) && !isMeta) {
+              for (const [key, val] of parsedMap.entries()) {
+                if (Math.abs(key - totalSeconds) <= 0.6 && !val.isMeta && !val.translation && !/[\u4e00-\u9fa5]/.test(val.text)) {
+                  val.translation = text;
+                  mergedWithClose = true;
+                  break;
+                }
+              }
+            }
+            if (!mergedWithClose) {
+              parsedMap.set(totalSeconds, { text, translation: inlineTrans, isMeta });
+            }
           }
         }
       }
@@ -126,21 +180,21 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     }
 
     let matchedCount = 0;
-    // Step 1: Fuzzy timestamp matching (tolerance up to 1.5s)
+    // Step 1: Fuzzy timestamp matching (tolerance up to 1.8s)
     for (const transItem of validTransLines) {
       let bestKey: number | null = null;
       let minDiff = Infinity;
 
       for (const [key, val] of parsedMap.entries()) {
         const diff = Math.abs(key - transItem.time);
-        const adjustedDiff = val.isMeta ? diff + 0.8 : (val.translation ? diff + 0.4 : diff);
+        const adjustedDiff = val.isMeta ? diff + 0.8 : (val.translation ? diff + 0.5 : diff);
         if (adjustedDiff < minDiff) {
           minDiff = adjustedDiff;
           bestKey = key;
         }
       }
 
-      if (bestKey !== null && minDiff <= 1.5) {
+      if (bestKey !== null && minDiff <= 1.8) {
         const current = parsedMap.get(bestKey)!;
         if (!current.translation || minDiff <= 0.3) {
           current.translation = transItem.text;
@@ -149,8 +203,8 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
       }
     }
 
-    // Step 2: Fallback sequential alignment if timestamp matching failed
-    if (matchedCount === 0 && validTransLines.length > 0 && parsedMap.size > 0) {
+    // Step 2: Fallback sequential alignment if timestamp matching was sparse
+    if (matchedCount < Math.min(3, validTransLines.length) && validTransLines.length > 0 && parsedMap.size > 0) {
       const sortedKeys = Array.from(parsedMap.keys()).sort((a, b) => a - b);
       const nonMetaKeys = sortedKeys.filter((k) => !parsedMap.get(k)?.isMeta);
       const targetKeys = nonMetaKeys.length > 0 ? nonMetaKeys : sortedKeys;
@@ -660,6 +714,99 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
   return { lyrics: [], rawLyric: '' };
 }
 
+/**
+ * Helper to check if parsed lyrics contain any actual translations
+ */
+function hasLyricsTranslation(lines: LyricLine[]): boolean {
+  return lines.some((l) => Boolean(l.translation && l.translation.trim()));
+}
+
+/**
+ * Check if the lyric is primarily foreign (English, Japanese, Korean, etc.)
+ */
+function isForeignContent(text: string, title?: string): boolean {
+  const combined = `${title || ''} ${text || ''}`;
+  const foreignChars = (combined.match(/[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+  const chineseChars = (combined.match(/[\u4e00-\u9fa5]/g) || []).length;
+  return foreignChars > 15 && (chineseChars === 0 || foreignChars > chineseChars * 1.5);
+}
+
+/**
+ * Universal Cross-Platform Translation Search & Fetcher
+ * Automatically finds translated lyrics from NetEase / Meting / GDStudio
+ * for foreign songs when QQ Music or current source lacks translations.
+ */
+async function fetchCrossPlatformTranslation(songName: string, artistName?: string): Promise<string> {
+  const cleanName = songName.replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '').trim();
+  const searchKw = `${cleanName} ${artistName || ''}`.trim() || cleanName;
+  if (!searchKw) return '';
+
+  // 1. Try GDStudio NetEase Search & Lyric API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const searchUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=3&source=netease&name=${encodeURIComponent(searchKw)}`;
+    const res = await fetch(searchUrl, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        const item = list[0];
+        const lyrId = item.id || item.url_id;
+        if (lyrId) {
+          const lyrRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${lyrId}&source=netease`);
+          if (lyrRes.ok) {
+            const lyrData = await lyrRes.json();
+            if (lyrData?.tlyric && lyrData.tlyric.includes('[')) {
+              return lyrData.tlyric;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 2. Try Meting NetEase Search & Lyric API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const metingUrl = `https://api.i-meto.com/meting/api?server=netease&type=search&id=${encodeURIComponent(searchKw)}`;
+    const res = await fetch(metingUrl, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        const item = list[0];
+        if (item.id) {
+          // Direct 163 Official API
+          try {
+            const officialRes = await fetch(`https://music.163.com/api/song/lyric?id=${item.id}&lv=-1&kv=-1&tv=-1`);
+            if (officialRes.ok) {
+              const oData = await officialRes.json();
+              if (oData?.tlyric?.lyric && oData.tlyric.lyric.includes('[')) {
+                return oData.tlyric.lyric;
+              }
+            }
+          } catch {}
+
+          // Meting tlrc
+          const tlrcRes = await fetch(`https://api.i-meto.com/meting/api?server=netease&type=tlrc&id=${item.id}`);
+          if (tlrcRes.ok) {
+            const text = await tlrcRes.text();
+            if (text && text.includes('[') && !text.includes('鉴权失败')) {
+              return text;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  return '';
+}
+
 // Client-side Direct QQ Music Search via JSONP
 async function clientSearchQQ(keyword: string): Promise<Song[]> {
   try {
@@ -696,71 +843,42 @@ async function clientSearchQQ(keyword: string): Promise<Song[]> {
   return [];
 }
 
-// Client-side Direct QQ Lyric with multiple failover providers
-async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string }> {
-  const targetId = songMid || '';
+// Client-side Direct QQ Lyric with multiple failover providers and cross-platform translation
+async function clientFetchQQLyrics(song: Song): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string }> {
+  const songMid = song.songMid || (song.id.startsWith('00') ? song.id : '');
+  const numericId = song.id.replace(/[^\d]/g, '');
+  const targetId = songMid || numericId || song.id;
+
+  let rawLyric = '';
+  let rawTLyric = '';
 
   // Strategy 1: GDStudio Unified QQ Lyric API (original + translation in one call)
   if (targetId) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetId)}&source=tencent`, {
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.lyric && data.lyric.includes('[')) {
-          const parsed = parseLrc(data.lyric, data.tlyric);
-          if (parsed.length > 0) {
-            return {
-              lyrics: parsed,
-              rawLyric: data.lyric,
-              rawTLyric: data.tlyric,
-            };
+    const tryIds = [targetId, numericId, songMid].filter(Boolean);
+    for (const idToTry of tryIds) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(idToTry)}&source=tencent`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.lyric && data.lyric.includes('[')) {
+            rawLyric = decodeQQLyricString(data.lyric);
+            if (data?.tlyric && data.tlyric.includes('[')) {
+              rawTLyric = decodeQQLyricString(data.tlyric);
+            }
+            break;
           }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
   }
 
-  // Strategy 2: Client JSONP from QQ Music Official (decodes trans with UTF-8 support)
-  try {
-    const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songMid)}&format=jsonp&nobase64=1`;
-    const data: any = await browserJsonp(url, 'jsonpCallback');
-    let rawLyric = '';
-    let rawTLyric = '';
-
-    if (data?.lyric) {
-      let decoded = data.lyric;
-      if (!decoded.includes('[') && !decoded.includes('\n')) {
-        decoded = safeBase64Decode(decoded);
-      }
-      rawLyric = decodeHtmlEntities(decoded);
-    }
-
-    if (data?.trans) {
-      let transDecoded = data.trans;
-      if (!transDecoded.includes('[') && !transDecoded.includes('\n')) {
-        transDecoded = safeBase64Decode(transDecoded);
-      }
-      rawTLyric = decodeHtmlEntities(transDecoded);
-    }
-
-    if (rawLyric) {
-      return {
-        lyrics: parseLrc(rawLyric, rawTLyric),
-        rawLyric,
-        rawTLyric,
-      };
-    }
-  } catch (err) {
-    console.warn('Client JSONP QQ lyric fetch failed:', err);
-  }
-
-  // Strategy 3: Meting & Injahow QQ mirrors (fetch lrc + tlrc in parallel)
-  if (targetId) {
+  // Strategy 2: Meting & Injahow QQ mirrors (fetch lrc + tlrc in parallel)
+  if (!rawLyric && targetId) {
     const qqPairs = [
       {
         lrc: `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
@@ -810,34 +928,71 @@ async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<
           if (tlrc.includes('鉴权失败') || tlrc.includes('未找到')) {
             tlrc = '';
           }
-          const parsed = parseLrc(lrc, tlrc);
-          if (parsed.length > 0) {
-            return {
-              lyrics: parsed,
-              rawLyric: lrc,
-              rawTLyric: tlrc,
-            };
-          }
+          rawLyric = decodeQQLyricString(lrc);
+          rawTLyric = decodeQQLyricString(tlrc);
+          break;
         }
       } catch (e) {}
     }
   }
 
-  // Strategy 4: Fallback to local DB
-  const fallback = FALLBACK_POPULAR_SONGS.find(
-    (s) =>
-      (songName && s.name.toLowerCase().includes(songName.toLowerCase())) ||
-      (songName && songName.toLowerCase().includes(s.name.toLowerCase()))
-  );
-  if (fallback) {
-    return {
-      lyrics: parseLrc(fallback.lrc, fallback.tlyric),
-      rawLyric: fallback.lrc,
-      rawTLyric: fallback.tlyric,
-    };
+  // Strategy 3: Client JSONP from QQ Music Official (decodes trans with UTF-8 support)
+  if (!rawLyric && songMid) {
+    try {
+      const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songMid)}&format=jsonp&nobase64=1`;
+      const data: any = await browserJsonp(url, 'jsonpCallback');
+
+      if (data?.lyric) {
+        rawLyric = decodeQQLyricString(data.lyric);
+      }
+      if (data?.trans || data?.trans_lyric || data?.tlyric) {
+        rawTLyric = decodeQQLyricString(data.trans || data.trans_lyric || data.tlyric);
+      }
+    } catch (err) {
+      console.warn('Client JSONP QQ lyric fetch failed:', err);
+    }
   }
 
-  return { lyrics: [], rawLyric: '' };
+  // Strategy 4: Fallback to local DB if no lyric found at all
+  if (!rawLyric) {
+    const fallback = FALLBACK_POPULAR_SONGS.find(
+      (s) =>
+        (song.name && s.name.toLowerCase().includes(song.name.toLowerCase())) ||
+        (song.name && song.name.toLowerCase().includes(s.name.toLowerCase()))
+    );
+    if (fallback) {
+      rawLyric = fallback.lrc;
+      rawTLyric = fallback.tlyric || '';
+    }
+  }
+
+  if (!rawLyric) {
+    return { lyrics: [], rawLyric: '' };
+  }
+
+  // Parse initial lyrics
+  let parsed = parseLrc(rawLyric, rawTLyric);
+
+  // Strategy 5: CRITICAL Cross-Platform Translation Fallback for foreign songs
+  // If the song has foreign text and lacks translation in QQ Music, query NetEase/GDStudio translations
+  if (!hasLyricsTranslation(parsed) && isForeignContent(rawLyric, song.name)) {
+    try {
+      console.info('Querying cross-platform translation for foreign QQ song:', song.name);
+      const crossTLyric = await fetchCrossPlatformTranslation(song.name, song.artist);
+      if (crossTLyric && crossTLyric.includes('[')) {
+        rawTLyric = crossTLyric;
+        parsed = parseLrc(rawLyric, crossTLyric);
+      }
+    } catch (e) {
+      console.warn('Cross-platform translation fetch failed:', e);
+    }
+  }
+
+  return {
+    lyrics: parsed,
+    rawLyric,
+    rawTLyric,
+  };
 }
 
 /**
@@ -985,7 +1140,7 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
   // Step 2: Client-side Direct Lyric Fetcher
   console.info('Activating client-side direct lyric fetcher for:', song.name, song.platform);
   if (song.platform === 'qq') {
-    const directQQ = await clientFetchQQLyrics(song.songMid || song.id, song.name);
+    const directQQ = await clientFetchQQLyrics(song);
     if (directQQ.lyrics.length > 0) {
       return {
         song,
