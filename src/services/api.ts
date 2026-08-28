@@ -726,9 +726,9 @@ function hasLyricsTranslation(lines: LyricLine[]): boolean {
  */
 function isForeignContent(text: string, title?: string): boolean {
   const combined = `${title || ''} ${text || ''}`;
-  const foreignChars = (combined.match(/[a-zA-Z\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+  const foreignChars = (combined.match(/[a-zA-Z\u3040-\u30ff\uac00-\ud7af\u0400-\u04ff\u00C0-\u024F]/g) || []).length;
   const chineseChars = (combined.match(/[\u4e00-\u9fa5]/g) || []).length;
-  return foreignChars > 15 && (chineseChars === 0 || foreignChars > chineseChars * 1.5);
+  return foreignChars > 8 && (chineseChars === 0 || foreignChars > chineseChars * 0.8);
 }
 
 /**
@@ -737,7 +737,11 @@ function isForeignContent(text: string, title?: string): boolean {
  * for foreign songs when QQ Music or current source lacks translations.
  */
 async function fetchCrossPlatformTranslation(songName: string, artistName?: string): Promise<string> {
-  const cleanName = songName.replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '').trim();
+  const cleanName = songName
+    .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】|\{.*?\}/g, '')
+    .replace(/feat\..*/i, '')
+    .replace(/ft\..*/i, '')
+    .trim();
   const searchKw = `${cleanName} ${artistName || ''}`.trim() || cleanName;
   if (!searchKw) return '';
 
@@ -745,22 +749,25 @@ async function fetchCrossPlatformTranslation(songName: string, artistName?: stri
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3500);
-    const searchUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=3&source=netease&name=${encodeURIComponent(searchKw)}`;
+    const searchUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=5&source=netease&name=${encodeURIComponent(searchKw)}`;
     const res = await fetch(searchUrl, { signal: controller.signal });
     clearTimeout(timer);
 
     if (res.ok) {
       const list = await res.json();
       if (Array.isArray(list) && list.length > 0) {
-        const item = list[0];
-        const lyrId = item.id || item.url_id;
-        if (lyrId) {
-          const lyrRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${lyrId}&source=netease`);
-          if (lyrRes.ok) {
-            const lyrData = await lyrRes.json();
-            if (lyrData?.tlyric && lyrData.tlyric.includes('[')) {
-              return lyrData.tlyric;
-            }
+        for (const item of list.slice(0, 3)) {
+          const lyrId = item.id || item.url_id;
+          if (lyrId) {
+            try {
+              const lyrRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${lyrId}&source=netease`);
+              if (lyrRes.ok) {
+                const lyrData = await lyrRes.json();
+                if (lyrData?.tlyric && lyrData.tlyric.includes('[')) {
+                  return lyrData.tlyric;
+                }
+              }
+            } catch (e) {}
           }
         }
       }
@@ -778,26 +785,45 @@ async function fetchCrossPlatformTranslation(songName: string, artistName?: stri
     if (res.ok) {
       const list = await res.json();
       if (Array.isArray(list) && list.length > 0) {
-        const item = list[0];
-        if (item.id) {
-          // Direct 163 Official API
-          try {
-            const officialRes = await fetch(`https://music.163.com/api/song/lyric?id=${item.id}&lv=-1&kv=-1&tv=-1`);
-            if (officialRes.ok) {
-              const oData = await officialRes.json();
-              if (oData?.tlyric?.lyric && oData.tlyric.lyric.includes('[')) {
-                return oData.tlyric.lyric;
+        for (const item of list.slice(0, 3)) {
+          if (item.id) {
+            try {
+              const tlrcRes = await fetch(`https://api.i-meto.com/meting/api?server=netease&type=tlrc&id=${item.id}`);
+              if (tlrcRes.ok) {
+                const text = await tlrcRes.text();
+                if (text && text.includes('[') && !text.includes('鉴权失败') && !text.includes('未找到')) {
+                  return text;
+                }
               }
-            }
-          } catch {}
+            } catch (e) {}
+          }
+        }
+      }
+    }
+  } catch (e) {}
 
-          // Meting tlrc
-          const tlrcRes = await fetch(`https://api.i-meto.com/meting/api?server=netease&type=tlrc&id=${item.id}`);
-          if (tlrcRes.ok) {
-            const text = await tlrcRes.text();
-            if (text && text.includes('[') && !text.includes('鉴权失败')) {
-              return text;
-            }
+  // 3. Try Injahow Mirror NetEase API
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const injahowUrl = `https://api.injahow.cn/meting/?server=netease&type=search&id=${encodeURIComponent(searchKw)}`;
+    const res = await fetch(injahowUrl, { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) {
+        for (const item of list.slice(0, 3)) {
+          if (item.id) {
+            try {
+              const tlrcRes = await fetch(`https://api.injahow.cn/meting/?server=netease&type=tlrc&id=${item.id}`);
+              if (tlrcRes.ok) {
+                const text = await tlrcRes.text();
+                if (text && text.includes('[') && !text.includes('鉴权失败') && !text.includes('未找到')) {
+                  return text;
+                }
+              }
+            } catch (e) {}
           }
         }
       }
@@ -1114,6 +1140,8 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
   if (song.songMid) params.append('songMid', song.songMid);
   if (song.lrcUrl) params.append('lrcUrl', song.lrcUrl);
 
+  let resultData: SongDetailResponse | null = null;
+
   // Step 1: Try backend API
   try {
     const controller = new AbortController();
@@ -1129,7 +1157,7 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
       if (contentType.includes('application/json')) {
         const data: SongDetailResponse = await res.json();
         if (data.lyrics && data.lyrics.length > 0) {
-          return data;
+          resultData = data;
         }
       }
     }
@@ -1137,53 +1165,79 @@ export async function fetchSongDetail(song: Song): Promise<SongDetailResponse> {
     console.warn('Backend /api/music/lyrics failed or offline:', err);
   }
 
-  // Step 2: Client-side Direct Lyric Fetcher
-  console.info('Activating client-side direct lyric fetcher for:', song.name, song.platform);
-  if (song.platform === 'qq') {
-    const directQQ = await clientFetchQQLyrics(song);
-    if (directQQ.lyrics.length > 0) {
-      return {
-        song,
-        rawLyric: directQQ.rawLyric,
-        rawTLyric: directQQ.rawTLyric,
-        lyrics: directQQ.lyrics,
-        hasLyric: true,
-      };
+  // Step 2: Client-side Direct Lyric Fetcher (if backend failed or returned empty)
+  if (!resultData || !resultData.lyrics || resultData.lyrics.length === 0) {
+    console.info('Activating client-side direct lyric fetcher for:', song.name, song.platform);
+    if (song.platform === 'qq') {
+      const directQQ = await clientFetchQQLyrics(song);
+      if (directQQ.lyrics.length > 0) {
+        resultData = {
+          song,
+          rawLyric: directQQ.rawLyric,
+          rawTLyric: directQQ.rawTLyric,
+          lyrics: directQQ.lyrics,
+          hasLyric: true,
+        };
+      }
+    } else {
+      const directNetease = await clientFetchNeteaseLyrics(song);
+      if (directNetease.lyrics.length > 0) {
+        resultData = {
+          song: {
+            ...song,
+            albumCover: directNetease.albumCover || song.albumCover,
+          },
+          rawLyric: directNetease.rawLyric,
+          rawTLyric: directNetease.rawTLyric,
+          lyrics: directNetease.lyrics,
+          hasLyric: true,
+        };
+      }
     }
-  } else {
-    const directNetease = await clientFetchNeteaseLyrics(song);
-    if (directNetease.lyrics.length > 0) {
-      return {
+  }
+
+  // Step 3: Check fallback library if still empty
+  if (!resultData || !resultData.lyrics || resultData.lyrics.length === 0) {
+    const fallback = FALLBACK_POPULAR_SONGS.find(
+      (s) =>
+        s.name.toLowerCase().includes(song.name.toLowerCase()) ||
+        song.name.toLowerCase().includes(s.name.toLowerCase())
+    );
+    if (fallback) {
+      const parsed = parseLrc(fallback.lrc, fallback.tlyric);
+      resultData = {
         song: {
           ...song,
-          albumCover: directNetease.albumCover || song.albumCover,
+          albumCover: song.albumCover || (song.platform === 'qq' ? fallback.qqCover : fallback.neteaseCover),
         },
-        rawLyric: directNetease.rawLyric,
-        rawTLyric: directNetease.rawTLyric,
-        lyrics: directNetease.lyrics,
-        hasLyric: true,
+        rawLyric: fallback.lrc,
+        rawTLyric: fallback.tlyric,
+        lyrics: parsed,
+        hasLyric: parsed.length > 0,
       };
     }
   }
 
-  // Check fallback library
-  const fallback = FALLBACK_POPULAR_SONGS.find(
-    (s) =>
-      s.name.toLowerCase().includes(song.name.toLowerCase()) ||
-      song.name.toLowerCase().includes(s.name.toLowerCase())
-  );
-  if (fallback) {
-    const parsed = parseLrc(fallback.lrc, fallback.tlyric);
-    return {
-      song: {
-        ...song,
-        albumCover: song.albumCover || (song.platform === 'qq' ? fallback.qqCover : fallback.neteaseCover),
-      },
-      rawLyric: fallback.lrc,
-      rawTLyric: fallback.tlyric,
-      lyrics: parsed,
-      hasLyric: parsed.length > 0,
-    };
+  // CRITICAL FINAL TRANSLATION PASS:
+  // Whether from Backend, Direct Client, or Fallback DB,
+  // if the lyrics lack translations and contain foreign text (English / Japanese / Korean / etc.),
+  // proactively fetch translation from cross-platform mirrors and merge into lyrics!
+  if (resultData && resultData.lyrics && resultData.lyrics.length > 0) {
+    const hasTrans = hasLyricsTranslation(resultData.lyrics);
+    const foreign = isForeignContent(resultData.rawLyric || '', song.name);
+    if (!hasTrans && foreign) {
+      console.info('Triggering final cross-platform translation enhancement for:', song.name, song.artist);
+      try {
+        const crossTLyric = await fetchCrossPlatformTranslation(song.name, song.artist);
+        if (crossTLyric && crossTLyric.includes('[')) {
+          resultData.rawTLyric = crossTLyric;
+          resultData.lyrics = parseLrc(resultData.rawLyric || '', crossTLyric);
+        }
+      } catch (e) {
+        console.warn('Final translation enhancement error:', e);
+      }
+    }
+    return resultData;
   }
 
   return {

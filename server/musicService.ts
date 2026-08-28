@@ -1033,6 +1033,7 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
           } catch {
             rawLyric = lyricData.lyric;
           }
+          rawLyric = decodeHtmlEntities(rawLyric);
         }
         if (lyricData.trans) {
           try {
@@ -1040,6 +1041,7 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
           } catch {
             rawTLyric = lyricData.trans;
           }
+          rawTLyric = decodeHtmlEntities(rawTLyric);
         }
       }
     }
@@ -1113,8 +1115,8 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
       if (res.ok) {
         const data = await res.json();
         if (data?.lyric && data.lyric.includes('[')) {
-          rawLyric = data.lyric;
-          rawTLyric = data.tlyric || '';
+          rawLyric = decodeHtmlEntities(data.lyric);
+          rawTLyric = data.tlyric ? decodeHtmlEntities(data.tlyric) : '';
         }
       }
     } catch (e) {}
@@ -1154,8 +1156,8 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
             if (tlrc.includes('鉴权失败') || tlrc.includes('未找到')) {
               tlrc = '';
             }
-            rawLyric = lrc;
-            rawTLyric = tlrc;
+            rawLyric = decodeHtmlEntities(lrc);
+            rawTLyric = decodeHtmlEntities(tlrc);
             break;
           }
         } catch (e) {}
@@ -1171,16 +1173,26 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
     }
   }
 
-  // Cross-platform translation fallback if rawTLyric is missing
-  if (!rawTLyric && rawLyric && (songName || artist)) {
-    const query = [songName, artist].filter(Boolean).join(' ');
+  // Cross-platform translation fallback if rawTLyric is missing or parsed lyrics have no translation
+  const testParsed = parseLrc(rawLyric, rawTLyric);
+  const needsTranslation = (!rawTLyric || !testParsed.some((l) => Boolean(l.translation))) && rawLyric;
+
+  if (needsTranslation && (songName || artist)) {
+    const cleanSongName = (songName || '')
+      .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】|\{.*?\}/g, '')
+      .replace(/feat\..*/i, '')
+      .replace(/ft\..*/i, '')
+      .trim();
+    const query = `${cleanSongName} ${artist || ''}`.trim() || cleanSongName;
     try {
-      const neteaseData = await searchNeteaseMusic(query);
+      const neteaseData = await searchNetease(query);
       if (neteaseData.length > 0) {
-        const topSong = neteaseData[0];
-        const neteaseDetail = await getNeteaseDetail(topSong.id, topSong.name);
-        if (neteaseDetail.rawTLyric && neteaseDetail.rawTLyric.includes('[')) {
-          rawTLyric = neteaseDetail.rawTLyric;
+        for (const topSong of neteaseData.slice(0, 4)) {
+          const neteaseDetail = await getNeteaseDetail(topSong.id, topSong.name);
+          if (neteaseDetail.rawTLyric && neteaseDetail.rawTLyric.includes('[')) {
+            rawTLyric = neteaseDetail.rawTLyric;
+            break;
+          }
         }
       }
     } catch (e) {
