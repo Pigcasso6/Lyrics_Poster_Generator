@@ -88,26 +88,30 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
     }
   };
 
-  const [imgError, setImgError] = React.useState(false);
+  const [imgErrorCount, setImgErrorCount] = React.useState(0);
 
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
   const cleanAlbum = cleanAlbumName(song.album);
   
   const rawCover = (customCoverUrl || song.albumCover || '').replace(/^http:\/\//i, 'https://');
-  
-  // Force route through same-origin proxy to completely avoid canvas cross-origin taint
-  const proxyCover = rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')
-    ? `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`
-    : rawCover;
 
   React.useEffect(() => {
-    setImgError(false);
+    setImgErrorCount(0);
   }, [rawCover]);
 
-  const coverImageSrc = imgError || !rawCover
-    ? generateVinylCoverSvg(cleanSongName, cleanArtist)
-    : proxyCover;
+  let coverImageSrc = rawCover;
+  if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
+    if (imgErrorCount === 0) {
+      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`;
+    } else if (imgErrorCount === 1) {
+      coverImageSrc = `https://wsrv.nl/?url=${encodeURIComponent(rawCover)}&output=webp`;
+    } else {
+      coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
+    }
+  } else if (!rawCover || imgErrorCount > 1) {
+    coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
+  }
 
   return (
     <div
@@ -149,7 +153,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
               crossOrigin="anonymous"
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover block"
-              onError={() => setImgError(true)}
+              onError={() => setImgErrorCount(c => c + 1)}
             />
           </div>
         </div>
