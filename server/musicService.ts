@@ -54,7 +54,7 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&apos;/g, "'");
 }
 
-// Parse standard LRC format into structured lines with precise translation matching
+// Parse standard LRC format into structured lines with robust translation matching
 export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
   if (!lrcText) return [];
 
@@ -66,14 +66,8 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
   // Parse original lyrics
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed || /^\[(ti|ar|al|by|offset|kana):/i.test(trimmed)) continue;
 
-    // Filter out meta tags like [ti: ...], [ar: ...]
-    if (/^\[(ti|ar|al|by|offset|kana):/i.test(trimmed)) {
-      continue;
-    }
-
-    // Collect all timestamps on this line
     const matches = [...trimmed.matchAll(timeRegex)];
     const text = trimmed.replace(timeRegex, '').trim();
 
@@ -85,7 +79,21 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
           const seconds = parseInt(match[2], 10);
           const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
           const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
-          parsedMap.set(totalSeconds, { text, isMeta });
+
+          // Check if timestamp already exists
+          const existing = parsedMap.get(totalSeconds);
+          if (existing) {
+            // If existing is foreign/non-Chinese and current line has Chinese characters, treat as translation
+            if (!/[\u4e00-\u9fa5]/.test(existing.text) && /[\u4e00-\u9fa5]/.test(text)) {
+              existing.translation = text;
+            } else if (/[\u4e00-\u9fa5]/.test(existing.text) && !/[\u4e00-\u9fa5]/.test(text)) {
+              parsedMap.set(totalSeconds, { text, translation: existing.text, isMeta });
+            } else if (!existing.text && text) {
+              parsedMap.set(totalSeconds, { text, isMeta });
+            }
+          } else {
+            parsedMap.set(totalSeconds, { text, isMeta });
+          }
         }
       }
     } else if (trimmed) {
@@ -93,17 +101,18 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     }
   }
 
-  // Parse translation lyrics if present
+  // Parse external translation lyrics if present
   if (tlyricText) {
     const tlines = tlyricText.split('\n');
+    const validTransLines: Array<{ time: number; text: string }> = [];
+
     for (const line of tlines) {
       const trimmed = line.trim();
-      if (!trimmed || /^\[(ti|ar|al|by):/i.test(trimmed)) continue;
+      if (!trimmed || /^\[(ti|ar|al|by|offset):/i.test(trimmed)) continue;
       const matches = [...trimmed.matchAll(timeRegex)];
       let transText = trimmed.replace(timeRegex, '').trim();
 
-      // QQ Music blank translation lines often use '//'
-      if (transText === '//' || transText === '/') {
+      if (transText === '//' || transText === '/' || transText === '.') {
         transText = '';
       }
 
@@ -113,25 +122,47 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
           const seconds = parseInt(match[2], 10);
           const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
           const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
+          validTransLines.push({ time: totalSeconds, text: transText });
+        }
+      }
+    }
 
-          // Find the key with MINIMUM distance (prioritizing non-metadata lines)
-          let bestKey: number | null = null;
-          let minDiff = Infinity;
+    let matchedCount = 0;
+    // Step 1: Fuzzy timestamp matching (tolerance up to 1.5s)
+    for (const transItem of validTransLines) {
+      let bestKey: number | null = null;
+      let minDiff = Infinity;
 
-          for (const [key, val] of parsedMap.entries()) {
-            const diff = Math.abs(key - totalSeconds);
-            // If the line is pure metadata (like 词：/曲：) and diff isn't nearly 0, penalize it
-            const adjustedDiff = val.isMeta ? diff + 0.6 : diff;
-            if (adjustedDiff < minDiff) {
-              minDiff = adjustedDiff;
-              bestKey = key;
-            }
-          }
+      for (const [key, val] of parsedMap.entries()) {
+        const diff = Math.abs(key - transItem.time);
+        const adjustedDiff = val.isMeta ? diff + 0.8 : (val.translation ? diff + 0.4 : diff);
+        if (adjustedDiff < minDiff) {
+          minDiff = adjustedDiff;
+          bestKey = key;
+        }
+      }
 
-          if (bestKey !== null && minDiff <= 0.4) {
-            const current = parsedMap.get(bestKey)!;
-            current.translation = transText;
-          }
+      if (bestKey !== null && minDiff <= 1.5) {
+        const current = parsedMap.get(bestKey)!;
+        if (!current.translation || minDiff <= 0.3) {
+          current.translation = transItem.text;
+          matchedCount++;
+        }
+      }
+    }
+
+    // Step 2: Fallback sequential alignment if timestamp matching failed
+    if (matchedCount === 0 && validTransLines.length > 0 && parsedMap.size > 0) {
+      const sortedKeys = Array.from(parsedMap.keys()).sort((a, b) => a - b);
+      const nonMetaKeys = sortedKeys.filter((k) => !parsedMap.get(k)?.isMeta);
+      const targetKeys = nonMetaKeys.length > 0 ? nonMetaKeys : sortedKeys;
+
+      const count = Math.min(targetKeys.length, validTransLines.length);
+      for (let i = 0; i < count; i++) {
+        const key = targetKeys[i];
+        const val = parsedMap.get(key);
+        if (val && !val.translation) {
+          val.translation = validTransLines[i].text;
         }
       }
     }
@@ -835,35 +866,64 @@ export async function getNeteaseDetail(id: string, songName?: string, lrcUrl?: s
   if (!rawLyric) {
     const numericId = id.replace(/[^\d]/g, '');
     if (numericId) {
-      const mirrors = [
-        `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
-        `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
-        `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`,
-      ];
-      for (const mirrorUrl of mirrors) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const res = await fetch(mirrorUrl, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (res.ok) {
-            const contentType = res.headers.get('content-type') || '';
+      // First try GDStudio JSON which includes both lyric & tlyric
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`, {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.lyric && data.lyric.includes('[')) {
+            rawLyric = data.lyric;
+            rawTLyric = data.tlyric || '';
+          }
+        }
+      } catch (e) {}
+
+      // Fallback to Meting / Injahow pairs (parallel lrc + tlrc)
+      if (!rawLyric) {
+        const mirrorPairs = [
+          {
+            lrc: `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
+            tlrc: `https://api.i-meto.com/meting/api?server=netease&type=tlrc&id=${numericId}`,
+          },
+          {
+            lrc: `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
+            tlrc: `https://api.injahow.cn/meting/?server=netease&type=tlrc&id=${numericId}`,
+          },
+        ];
+        for (const pair of mirrorPairs) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            const [lRes, tlRes] = await Promise.allSettled([
+              fetch(pair.lrc, { signal: controller.signal }),
+              fetch(pair.tlrc, { signal: controller.signal }),
+            ]);
+            clearTimeout(timeoutId);
+
             let lrc = '';
             let tlrc = '';
-            if (contentType.includes('application/json')) {
-              const data = await res.json();
-              lrc = data.lyric || data.lrc || '';
-              tlrc = data.tlyric || data.tlrc || '';
-            } else {
-              lrc = await res.text();
+            if (lRes.status === 'fulfilled' && lRes.value.ok) {
+              lrc = await lRes.value.text();
             }
+            if (tlRes.status === 'fulfilled' && tlRes.value.ok) {
+              tlrc = await tlRes.value.text();
+            }
+
             if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败') && !lrc.includes('非法调用')) {
+              if (tlrc.includes('鉴权失败') || tlrc.includes('非法调用')) {
+                tlrc = '';
+              }
               rawLyric = lrc;
               rawTLyric = tlrc;
               break;
             }
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
       }
     }
   }
@@ -883,11 +943,22 @@ export async function getNeteaseDetail(id: string, songName?: string, lrcUrl?: s
         if (Array.isArray(list) && list.length > 0) {
           const matched = list.find((it: any) => String(it.id) === String(id) || (it.lrc && it.lrc.includes(`id=${id}`))) || list[0];
           if (matched?.lrc) {
-            const lRes = await fetch(matched.lrc);
-            if (lRes.ok) {
-              const lText = await lRes.text();
+            const tlrcUrl = matched.lrc.replace(/type=lrc/i, 'type=tlrc');
+            const [lRes, tlRes] = await Promise.allSettled([
+              fetch(matched.lrc),
+              fetch(tlrcUrl),
+            ]);
+
+            if (lRes.status === 'fulfilled' && lRes.value.ok) {
+              const lText = await lRes.value.text();
               if (lText && lText.includes('[') && !lText.includes('鉴权失败')) {
                 rawLyric = lText;
+              }
+            }
+            if (tlRes.status === 'fulfilled' && tlRes.value.ok) {
+              const tlText = await tlRes.value.text();
+              if (tlText && tlText.includes('[') && !tlText.includes('鉴权失败')) {
+                rawTLyric = tlText;
               }
             }
           }
@@ -1031,35 +1102,64 @@ export async function getQQDetail(id: string, songMid?: string): Promise<{ lyric
 
   // Strategy 3: Meting & GDStudio direct lyric mirror for QQ
   if (!rawLyric && targetMid) {
-    const qqMirrors = [
-      `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
-      `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
-      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetMid)}&source=tencent`,
-    ];
-    for (const mirrorUrl of qqMirrors) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(mirrorUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const contentType = res.headers.get('content-type') || '';
+    // 1. Try GDStudio JSON first
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetMid)}&source=tencent`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.lyric && data.lyric.includes('[')) {
+          rawLyric = data.lyric;
+          rawTLyric = data.tlyric || '';
+        }
+      }
+    } catch (e) {}
+
+    // 2. Try Meting / Injahow parallel lrc + tlrc
+    if (!rawLyric) {
+      const qqPairs = [
+        {
+          lrc: `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
+          tlrc: `https://api.i-meto.com/meting/api?server=tencent&type=tlrc&id=${encodeURIComponent(targetMid)}`,
+        },
+        {
+          lrc: `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetMid)}`,
+          tlrc: `https://api.injahow.cn/meting/?server=tencent&type=tlrc&id=${encodeURIComponent(targetMid)}`,
+        },
+      ];
+      for (const pair of qqPairs) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const [lRes, tlRes] = await Promise.allSettled([
+            fetch(pair.lrc, { signal: controller.signal }),
+            fetch(pair.tlrc, { signal: controller.signal }),
+          ]);
+          clearTimeout(timeoutId);
+
           let lrc = '';
           let tlrc = '';
-          if (contentType.includes('application/json')) {
-            const data = await res.json();
-            lrc = data.lyric || data.lrc || '';
-            tlrc = data.tlyric || data.tlrc || '';
-          } else {
-            lrc = await res.text();
+          if (lRes.status === 'fulfilled' && lRes.value.ok) {
+            lrc = await lRes.value.text();
           }
+          if (tlRes.status === 'fulfilled' && tlRes.value.ok) {
+            tlrc = await tlRes.value.text();
+          }
+
           if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败')) {
+            if (tlrc.includes('鉴权失败') || tlrc.includes('未找到')) {
+              tlrc = '';
+            }
             rawLyric = lrc;
             rawTLyric = tlrc;
             break;
           }
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
     }
   }
 

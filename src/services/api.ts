@@ -26,7 +26,33 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&apos;/g, "'");
 }
 
-// Client-side LRC Parser
+/**
+ * UTF-8 safe Base64 Decoder (prevents garbled Chinese / Japanese characters)
+ */
+function safeBase64Decode(str: string): string {
+  if (!str) return '';
+  const trimmed = str.trim();
+  try {
+    const binary = atob(trimmed);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch {
+    try {
+      return decodeURIComponent(escape(atob(trimmed)));
+    } catch {
+      try {
+        return atob(trimmed);
+      } catch {
+        return str;
+      }
+    }
+  }
+}
+
+// Client-side LRC Parser with robust translation alignment
 export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
   if (!lrcText) return [];
 
@@ -50,7 +76,22 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
           const seconds = parseInt(match[2], 10);
           const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
           const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
-          parsedMap.set(totalSeconds, { text, isMeta });
+
+          // Check if timestamp already exists
+          const existing = parsedMap.get(totalSeconds);
+          if (existing) {
+            // If existing is foreign/non-Chinese and current line has Chinese characters, treat as translation
+            if (!/[\u4e00-\u9fa5]/.test(existing.text) && /[\u4e00-\u9fa5]/.test(text)) {
+              existing.translation = text;
+            } else if (/[\u4e00-\u9fa5]/.test(existing.text) && !/[\u4e00-\u9fa5]/.test(text)) {
+              // Current is original, existing was translation
+              parsedMap.set(totalSeconds, { text, translation: existing.text, isMeta });
+            } else if (!existing.text && text) {
+              parsedMap.set(totalSeconds, { text, isMeta });
+            }
+          } else {
+            parsedMap.set(totalSeconds, { text, isMeta });
+          }
         }
       }
     } else if (trimmed) {
@@ -58,15 +99,18 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
     }
   }
 
+  // Parse external translation lyrics if present
   if (tlyricText) {
     const tlines = tlyricText.split('\n');
+    const validTransLines: Array<{ time: number; text: string }> = [];
+
     for (const line of tlines) {
       const trimmed = line.trim();
-      if (!trimmed || /^\[(ti|ar|al|by):/i.test(trimmed)) continue;
+      if (!trimmed || /^\[(ti|ar|al|by|offset):/i.test(trimmed)) continue;
       const matches = [...trimmed.matchAll(timeRegex)];
       let transText = trimmed.replace(timeRegex, '').trim();
 
-      if (transText === '//' || transText === '/') {
+      if (transText === '//' || transText === '/' || transText === '.') {
         transText = '';
       }
 
@@ -76,23 +120,47 @@ export function parseLrc(lrcText: string, tlyricText?: string): LyricLine[] {
           const seconds = parseInt(match[2], 10);
           const millis = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0;
           const totalSeconds = Math.round((minutes * 60 + seconds + millis / 1000) * 100) / 100;
+          validTransLines.push({ time: totalSeconds, text: transText });
+        }
+      }
+    }
 
-          let bestKey: number | null = null;
-          let minDiff = Infinity;
+    let matchedCount = 0;
+    // Step 1: Fuzzy timestamp matching (tolerance up to 1.5s)
+    for (const transItem of validTransLines) {
+      let bestKey: number | null = null;
+      let minDiff = Infinity;
 
-          for (const [key, val] of parsedMap.entries()) {
-            const diff = Math.abs(key - totalSeconds);
-            const adjustedDiff = val.isMeta ? diff + 0.6 : diff;
-            if (adjustedDiff < minDiff) {
-              minDiff = adjustedDiff;
-              bestKey = key;
-            }
-          }
+      for (const [key, val] of parsedMap.entries()) {
+        const diff = Math.abs(key - transItem.time);
+        const adjustedDiff = val.isMeta ? diff + 0.8 : (val.translation ? diff + 0.4 : diff);
+        if (adjustedDiff < minDiff) {
+          minDiff = adjustedDiff;
+          bestKey = key;
+        }
+      }
 
-          if (bestKey !== null && minDiff <= 0.4) {
-            const current = parsedMap.get(bestKey)!;
-            current.translation = transText;
-          }
+      if (bestKey !== null && minDiff <= 1.5) {
+        const current = parsedMap.get(bestKey)!;
+        if (!current.translation || minDiff <= 0.3) {
+          current.translation = transItem.text;
+          matchedCount++;
+        }
+      }
+    }
+
+    // Step 2: Fallback sequential alignment if timestamp matching failed
+    if (matchedCount === 0 && validTransLines.length > 0 && parsedMap.size > 0) {
+      const sortedKeys = Array.from(parsedMap.keys()).sort((a, b) => a - b);
+      const nonMetaKeys = sortedKeys.filter((k) => !parsedMap.get(k)?.isMeta);
+      const targetKeys = nonMetaKeys.length > 0 ? nonMetaKeys : sortedKeys;
+
+      const count = Math.min(targetKeys.length, validTransLines.length);
+      for (let i = 0; i < count; i++) {
+        const key = targetKeys[i];
+        const val = parsedMap.get(key);
+        if (val && !val.translation) {
+          val.translation = validTransLines[i].text;
         }
       }
     }
@@ -401,21 +469,26 @@ async function clientSearchNetease(keyword: string): Promise<Song[]> {
 
 // Client-side Direct NetEase Lyric Fetcher
 async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string; albumCover?: string }> {
-  // Strategy 1: Direct authenticated lrcUrl from search results
-  if (song.lrcUrl) {
+  const numericId = song.id.replace(/[^\d]/g, '');
+
+  // Strategy 1: GDStudio Unified API (contains both original & translation in one JSON)
+  if (numericId) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(song.lrcUrl, { signal: controller.signal });
+      const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`, {
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       if (res.ok) {
-        const text = await res.text();
-        if (text && text.includes('[') && !text.includes('鉴权失败') && !text.includes('非法调用')) {
-          const parsed = parseLrc(text);
+        const data = await res.json();
+        if (data?.lyric && data.lyric.includes('[')) {
+          const parsed = parseLrc(data.lyric, data.tlyric);
           if (parsed.length > 0) {
             return {
               lyrics: parsed,
-              rawLyric: text,
+              rawLyric: data.lyric,
+              rawTLyric: data.tlyric,
               albumCover: song.albumCover,
             };
           }
@@ -424,34 +497,23 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
     } catch (e) {}
   }
 
-  // Strategy 2: Direct lyric API by NetEase ID across multiple CORS mirrors
-  const numericId = song.id.replace(/[^\d]/g, '');
+  // Strategy 2: Direct NetEase Official Open Lyric API (supports latest translation lv=-1&kv=-1&tv=-1)
   if (numericId) {
-    const directLyricMirrors = [
-      `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
-      `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
-      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${numericId}&source=netease`,
+    const neteaseApis = [
+      `https://music.163.com/api/song/lyric?id=${numericId}&lv=-1&kv=-1&tv=-1`,
+      `https://interface.music.163.com/api/song/lyric?id=${numericId}&lv=-1&kv=-1&tv=-1`,
     ];
-
-    for (const mirrorUrl of directLyricMirrors) {
+    for (const apiUrl of neteaseApis) {
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(mirrorUrl, { signal: controller.signal });
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(apiUrl, { signal: controller.signal });
         clearTimeout(timer);
         if (res.ok) {
-          const contentType = res.headers.get('content-type') || '';
-          let lrc = '';
-          let tlrc = '';
-          if (contentType.includes('application/json')) {
-            const data = await res.json();
-            lrc = data.lyric || data.lrc || '';
-            tlrc = data.tlyric || data.tlrc || '';
-          } else {
-            lrc = await res.text();
-          }
-
-          if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败') && !lrc.includes('非法调用')) {
+          const data = await res.json();
+          const lrc = data?.lrc?.lyric || '';
+          const tlrc = data?.tlyric?.lyric || '';
+          if (lrc && lrc.includes('[')) {
             const parsed = parseLrc(lrc, tlrc);
             if (parsed.length > 0) {
               return {
@@ -467,7 +529,75 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
     }
   }
 
-  // Strategy 3: Meting Search & Lyric Retrieval by song title + artist
+  // Strategy 3: Direct lrcUrl & tlyricUrl from search results or Meting mirrors (Parallel Lrc + TLrc)
+  if (numericId || song.lrcUrl) {
+    const mirrorPairs = [
+      {
+        lrc: song.lrcUrl || `https://api.i-meto.com/meting/api?server=netease&type=lrc&id=${numericId}`,
+        tlrc: song.lrcUrl
+          ? song.lrcUrl.replace(/type=lrc/i, 'type=tlrc')
+          : `https://api.i-meto.com/meting/api?server=netease&type=tlrc&id=${numericId}`,
+      },
+      {
+        lrc: `https://api.injahow.cn/meting/?server=netease&type=lrc&id=${numericId}`,
+        tlrc: `https://api.injahow.cn/meting/?server=netease&type=tlrc&id=${numericId}`,
+      },
+    ];
+
+    for (const pair of mirrorPairs) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+
+        const [lrcRes, tlrcRes] = await Promise.allSettled([
+          fetch(pair.lrc, { signal: controller.signal }),
+          fetch(pair.tlrc, { signal: controller.signal }),
+        ]);
+        clearTimeout(timer);
+
+        let lrcText = '';
+        let tlrcText = '';
+
+        if (lrcRes.status === 'fulfilled' && lrcRes.value.ok) {
+          const cType = lrcRes.value.headers.get('content-type') || '';
+          if (cType.includes('application/json')) {
+            const data = await lrcRes.value.json();
+            lrcText = data.lyric || data.lrc || '';
+            tlrcText = data.tlyric || data.tlrc || '';
+          } else {
+            lrcText = await lrcRes.value.text();
+          }
+        }
+
+        if (!tlrcText && tlrcRes.status === 'fulfilled' && tlrcRes.value.ok) {
+          const cType = tlrcRes.value.headers.get('content-type') || '';
+          if (cType.includes('application/json')) {
+            const data = await tlrcRes.value.json();
+            tlrcText = data.tlyric || data.tlrc || data.lyric || '';
+          } else {
+            tlrcText = await tlrcRes.value.text();
+          }
+        }
+
+        if (lrcText && lrcText.includes('[') && !lrcText.includes('鉴权失败') && !lrcText.includes('非法调用')) {
+          if (tlrcText.includes('鉴权失败') || tlrcText.includes('非法调用') || tlrcText.includes('未找到')) {
+            tlrcText = '';
+          }
+          const parsed = parseLrc(lrcText, tlrcText);
+          if (parsed.length > 0) {
+            return {
+              lyrics: parsed,
+              rawLyric: lrcText,
+              rawTLyric: tlrcText,
+              albumCover: song.albumCover,
+            };
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Strategy 4: Meting Search & Lyric Retrieval by song title + artist
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
@@ -484,47 +614,28 @@ async function clientFetchNeteaseLyrics(song: Song): Promise<{ lyrics: LyricLine
           list[0];
 
         if (matched?.lrc) {
-          const lRes = await fetch(matched.lrc);
-          if (lRes.ok) {
-            const lText = await lRes.text();
-            if (lText && lText.includes('[') && !lText.includes('鉴权失败')) {
-              return {
-                lyrics: parseLrc(lText),
-                rawLyric: lText,
-                albumCover: matched.pic || song.albumCover,
-              };
-            }
+          const tlrcUrl = matched.lrc.replace(/type=lrc/i, 'type=tlrc');
+          const [lRes, tlRes] = await Promise.allSettled([
+            fetch(matched.lrc),
+            fetch(tlrcUrl),
+          ]);
+
+          let lText = '';
+          let tlText = '';
+          if (lRes.status === 'fulfilled' && lRes.value.ok) {
+            lText = await lRes.value.text();
           }
-        }
-      }
-    }
-  } catch (e) {}
+          if (tlRes.status === 'fulfilled' && tlRes.value.ok) {
+            tlText = await tlRes.value.text();
+          }
 
-  // Strategy 4: GDStudio Search & Lyric Retrieval by song title
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const gdUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=5&source=netease&name=${encodeURIComponent(song.name)}`;
-    const res = await fetch(gdUrl, { signal: controller.signal });
-    clearTimeout(timer);
-
-    if (res.ok) {
-      const list = await res.json();
-      if (Array.isArray(list) && list.length > 0) {
-        const item = list[0];
-        if (item.id || item.url_id) {
-          const lyricId = item.id || item.url_id;
-          const lyrRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${lyricId}&source=netease`);
-          if (lyrRes.ok) {
-            const lyrData = await lyrRes.json();
-            if (lyrData?.lyric && lyrData.lyric.includes('[')) {
-              return {
-                lyrics: parseLrc(lyrData.lyric, lyrData.tlyric),
-                rawLyric: lyrData.lyric,
-                rawTLyric: lyrData.tlyric,
-                albumCover: song.albumCover,
-              };
-            }
+          if (lText && lText.includes('[') && !lText.includes('鉴权失败')) {
+            return {
+              lyrics: parseLrc(lText, tlText),
+              rawLyric: lText,
+              rawTLyric: tlText,
+              albumCover: matched.pic || song.albumCover,
+            };
           }
         }
       }
@@ -587,49 +698,34 @@ async function clientSearchQQ(keyword: string): Promise<Song[]> {
 
 // Client-side Direct QQ Lyric with multiple failover providers
 async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<{ lyrics: LyricLine[]; rawLyric: string; rawTLyric?: string }> {
-  // Strategy 1: Meting & CORS lyric mirrors by QQ songMid/id
   const targetId = songMid || '';
+
+  // Strategy 1: GDStudio Unified QQ Lyric API (original + translation in one call)
   if (targetId) {
-    const qqMirrors = [
-      `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
-      `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
-      `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetId)}&source=tencent`,
-    ];
-
-    for (const mirrorUrl of qqMirrors) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(mirrorUrl, { signal: controller.signal });
-        clearTimeout(timer);
-        if (res.ok) {
-          const contentType = res.headers.get('content-type') || '';
-          let lrc = '';
-          let tlrc = '';
-          if (contentType.includes('application/json')) {
-            const data = await res.json();
-            lrc = data.lyric || data.lrc || '';
-            tlrc = data.tlyric || data.tlrc || '';
-          } else {
-            lrc = await res.text();
-          }
-
-          if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败')) {
-            const parsed = parseLrc(lrc, tlrc);
-            if (parsed.length > 0) {
-              return {
-                lyrics: parsed,
-                rawLyric: lrc,
-                rawTLyric: tlrc,
-              };
-            }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&id=${encodeURIComponent(targetId)}&source=tencent`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.lyric && data.lyric.includes('[')) {
+          const parsed = parseLrc(data.lyric, data.tlyric);
+          if (parsed.length > 0) {
+            return {
+              lyrics: parsed,
+              rawLyric: data.lyric,
+              rawTLyric: data.tlyric,
+            };
           }
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) {}
   }
 
-  // Strategy 2: Client JSONP from QQ Music
+  // Strategy 2: Client JSONP from QQ Music Official (decodes trans with UTF-8 support)
   try {
     const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songMid)}&format=jsonp&nobase64=1`;
     const data: any = await browserJsonp(url, 'jsonpCallback');
@@ -639,9 +735,7 @@ async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<
     if (data?.lyric) {
       let decoded = data.lyric;
       if (!decoded.includes('[') && !decoded.includes('\n')) {
-        try {
-          decoded = atob(decoded);
-        } catch {}
+        decoded = safeBase64Decode(decoded);
       }
       rawLyric = decodeHtmlEntities(decoded);
     }
@@ -649,9 +743,7 @@ async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<
     if (data?.trans) {
       let transDecoded = data.trans;
       if (!transDecoded.includes('[') && !transDecoded.includes('\n')) {
-        try {
-          transDecoded = atob(transDecoded);
-        } catch {}
+        transDecoded = safeBase64Decode(transDecoded);
       }
       rawTLyric = decodeHtmlEntities(transDecoded);
     }
@@ -667,7 +759,71 @@ async function clientFetchQQLyrics(songMid: string, songName?: string): Promise<
     console.warn('Client JSONP QQ lyric fetch failed:', err);
   }
 
-  // Strategy 3: Fallback to local DB
+  // Strategy 3: Meting & Injahow QQ mirrors (fetch lrc + tlrc in parallel)
+  if (targetId) {
+    const qqPairs = [
+      {
+        lrc: `https://api.i-meto.com/meting/api?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
+        tlrc: `https://api.i-meto.com/meting/api?server=tencent&type=tlrc&id=${encodeURIComponent(targetId)}`,
+      },
+      {
+        lrc: `https://api.injahow.cn/meting/?server=tencent&type=lrc&id=${encodeURIComponent(targetId)}`,
+        tlrc: `https://api.injahow.cn/meting/?server=tencent&type=tlrc&id=${encodeURIComponent(targetId)}`,
+      },
+    ];
+
+    for (const pair of qqPairs) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const [lRes, tlRes] = await Promise.allSettled([
+          fetch(pair.lrc, { signal: controller.signal }),
+          fetch(pair.tlrc, { signal: controller.signal }),
+        ]);
+        clearTimeout(timer);
+
+        let lrc = '';
+        let tlrc = '';
+
+        if (lRes.status === 'fulfilled' && lRes.value.ok) {
+          const contentType = lRes.value.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await lRes.value.json();
+            lrc = data.lyric || data.lrc || '';
+            tlrc = data.tlyric || data.tlrc || '';
+          } else {
+            lrc = await lRes.value.text();
+          }
+        }
+
+        if (!tlrc && tlRes.status === 'fulfilled' && tlRes.value.ok) {
+          const contentType = tlRes.value.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await tlRes.value.json();
+            tlrc = data.tlyric || data.tlrc || data.lyric || '';
+          } else {
+            tlrc = await tlRes.value.text();
+          }
+        }
+
+        if (lrc && lrc.includes('[') && !lrc.includes('鉴权失败')) {
+          if (tlrc.includes('鉴权失败') || tlrc.includes('未找到')) {
+            tlrc = '';
+          }
+          const parsed = parseLrc(lrc, tlrc);
+          if (parsed.length > 0) {
+            return {
+              lyrics: parsed,
+              rawLyric: lrc,
+              rawTLyric: tlrc,
+            };
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Strategy 4: Fallback to local DB
   const fallback = FALLBACK_POPULAR_SONGS.find(
     (s) =>
       (songName && s.name.toLowerCase().includes(songName.toLowerCase())) ||
