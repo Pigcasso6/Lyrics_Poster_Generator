@@ -90,7 +90,6 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   };
 
   const [imgErrorCount, setImgErrorCount] = React.useState(0);
-  const [base64Cover, setBase64Cover] = React.useState<string | null>(null);
 
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
@@ -100,33 +99,20 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   React.useEffect(() => {
     setImgErrorCount(0);
-    setBase64Cover(null);
-
-    if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
-      let isMounted = true;
-      urlToBase64(rawCover).then(dataUrl => {
-        if (isMounted && dataUrl && dataUrl.startsWith('data:')) {
-          setBase64Cover(dataUrl);
-        }
-      }).catch(err => console.warn('Preload base64 failed:', err));
-      return () => { isMounted = false; };
-    } else if (rawCover) {
-      setBase64Cover(rawCover);
-    }
   }, [rawCover]);
 
   let coverImageSrc = rawCover;
-  if (base64Cover) {
-    coverImageSrc = base64Cover;
-  } else if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
+  if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
     if (imgErrorCount === 0) {
-      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`;
+      coverImageSrc = rawCover;
     } else if (imgErrorCount === 1) {
+      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`;
+    } else if (imgErrorCount === 2) {
       coverImageSrc = `https://wsrv.nl/?url=${encodeURIComponent(rawCover)}&output=webp`;
     } else {
       coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
     }
-  } else if (!rawCover || imgErrorCount > 1) {
+  } else if (!rawCover || imgErrorCount > 2) {
     coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
   }
 
@@ -265,7 +251,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
           style={infoFontStyle}
         >
           <h4
-            className={`tracking-tight truncate w-full ${
+            className={`tracking-tight  w-full ${
               config.infoBold ? 'font-bold' : 'font-normal'
             } ${config.infoItalic ? 'italic' : 'not-italic'} ${
               config.fontSize === 'xl' ? 'text-sm' : 'text-xs'
@@ -284,11 +270,11 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
                 : 'justify-start'
             }`}
           >
-            <span className="shrink-0 max-w-[50%] sm:max-w-[60%] truncate">{cleanArtist}</span>
+            <span className="shrink-0 max-w-[50%] sm:max-w-[60%] ">{cleanArtist}</span>
             {config.showAlbumInfo && song.album && (
               <>
                 <span className="shrink-0 mx-1.5 opacity-60 select-none">·</span>
-                <span className="truncate shrink min-w-0">{cleanAlbum}</span>
+                <span className=" shrink min-w-0">{cleanAlbum}</span>
               </>
             )}
           </div>
