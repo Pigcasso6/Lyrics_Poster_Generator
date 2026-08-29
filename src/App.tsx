@@ -77,6 +77,26 @@ export default function App() {
         />
       </main>
 
+      {/* Footer bar for home / search page */}
+      <footer id="app-footer" className="w-full py-3 border-t border-slate-200/70 bg-slate-50 text-slate-500 text-xs text-center">
+        <div className="max-w-6xl mx-auto px-4 space-y-0.5 leading-snug">
+          <p id="copyright-text" className="font-normal text-slate-500">
+            © 2025—2026 Liang Zhu. 保留所有权利。
+          </p>
+          <p>
+            <a
+              id="icp-filing-link"
+              href="https://beian.miit.gov.cn/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-500 hover:text-sky-600 transition-colors underline-offset-2 hover:underline"
+            >
+              备案号：粤 ICP 备 2025513331 号
+            </a>
+          </p>
+        </div>
+      </footer>
+
       {/* Full Lyrics & Poster Studio Modal */}
       {isModalOpen && selectedSong && (
         <LyricsModal
