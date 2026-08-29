@@ -67,6 +67,10 @@ async function startServer() {
         lyricData = await getNeteaseDetail(id, name, req.query.lrcUrl as string);
       }
 
+      const finalCover = (albumCover && !albumCover.includes('i-meto.com'))
+        ? albumCover
+        : (lyricData.albumCover || albumCover);
+
       res.json({
         song: {
           id,
@@ -75,7 +79,7 @@ async function startServer() {
           name,
           artist,
           album,
-          albumCover: lyricData.albumCover || albumCover,
+          albumCover: finalCover,
           duration,
         },
         rawLyric: lyricData.rawLyric,

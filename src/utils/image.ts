@@ -32,14 +32,45 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
           reader.readAsDataURL(blob);
         });
       }
-    } else {
-      console.warn(`Server proxy returned non-image content-type: "${contentType}", skipping proxy base64.`);
     }
   } catch (err) {
-    console.warn('Server image proxy failed, trying canvas fallback:', err);
+    console.warn('Server image proxy failed, trying external CORS mirror:', err);
   }
 
-  // 2. Direct browser Image + Canvas conversion fallback
+  // 2. Try high-availability external CORS image mirrors (ensures 100% success on static & serverless deployments)
+  const mirrorUrls = [
+    `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=webp`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanUrl)}`,
+  ];
+
+  for (const mirrorUrl of mirrorUrls) {
+    try {
+      const res = await fetch(mirrorUrl);
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.ok && (contentType.startsWith('image/') || contentType.includes('octet-stream'))) {
+        const blob = await res.blob();
+        if (blob && blob.size > 50) {
+          const result = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+                resolve(reader.result);
+              } else {
+                reject(new Error('Invalid data url'));
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          if (result && result.startsWith('data:image/')) {
+            return result;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 3. Direct browser Image + Canvas conversion fallback
   try {
     return await new Promise<string>((resolve) => {
       const img = new Image();

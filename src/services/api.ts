@@ -1115,8 +1115,8 @@ async function clientSearchQQ(keyword: string): Promise<Song[]> {
           albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`;
         } else if (singerMid) {
           albumPic = `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg`;
-        } else {
-          albumPic = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${s.songmid || s.songid}`;
+        } else if (s.songmid) {
+          albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${s.songmid}.jpg`;
         }
 
         return {

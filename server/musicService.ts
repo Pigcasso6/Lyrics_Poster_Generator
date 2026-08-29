@@ -942,8 +942,8 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
             albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`;
           } else if (singerMid) {
             albumPic = `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg`;
-          } else {
-            albumPic = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${s.songmid || s.songid}`;
+          } else if (s.songmid) {
+            albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${s.songmid}.jpg`;
           }
 
           songs.push({
@@ -996,8 +996,8 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
               albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`;
             } else if (singerMid) {
               albumPic = `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg`;
-            } else {
-              albumPic = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${s.songmid || s.songid}`;
+            } else if (s.songmid) {
+              albumPic = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${s.songmid}.jpg`;
             }
 
             songs.push({
@@ -1046,7 +1046,7 @@ export async function searchQQ(keyword: string): Promise<Song[]> {
             name: s.name || keyword,
             artist: cleanArtist(s.singer || '未知歌手'),
             album: '精选单曲',
-            albumCover: `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${songId}`,
+            albumCover: `https://y.gtimg.cn/music/photo_new/T002R500x500M000${songId}.jpg`,
             duration: 240,
             url: `https://y.qq.com/n/ryqq/songDetail/${s.mid || s.id}`,
           });
@@ -1501,7 +1501,7 @@ export async function getQQDetail(id: string, songMid?: string, songName?: strin
   }
 
   if (!albumCover && targetMid) {
-    albumCover = `https://api.i-meto.com/meting/api?server=tencent&type=pic&id=${targetMid}`;
+    albumCover = `https://y.gtimg.cn/music/photo_new/T002R500x500M000${targetMid}.jpg`;
   }
 
   const parsed = parseLrc(rawLyric, rawTLyric);
