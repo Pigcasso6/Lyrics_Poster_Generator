@@ -92,6 +92,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   };
 
   const [imgError, setImgError] = React.useState(false);
+  const [base64Cover, setBase64Cover] = React.useState<string | null>(null);
 
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
@@ -101,11 +102,30 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
 
   React.useEffect(() => {
     setImgError(false);
+    setBase64Cover(null);
+
+    if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
+      let isMounted = true;
+      urlToBase64(rawCover).then((dataUrl) => {
+        if (isMounted && dataUrl && dataUrl.startsWith('data:image/')) {
+          setBase64Cover(dataUrl);
+        }
+      }).catch((err) => {
+        console.warn('Poster cover pre-conversion note:', err);
+      });
+      return () => {
+        isMounted = false;
+      };
+    } else if (rawCover) {
+      setBase64Cover(rawCover);
+    }
   }, [rawCover, song.id]);
 
   let coverImageSrc = rawCover;
   if (exportCoverUrl && exportCoverUrl.startsWith('data:image/')) {
     coverImageSrc = exportCoverUrl;
+  } else if (base64Cover) {
+    coverImageSrc = base64Cover;
   } else if (imgError || !rawCover) {
     coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
   }

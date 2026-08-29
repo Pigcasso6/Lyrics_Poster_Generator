@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import { Song, LyricLine, SongDetailResponse, PosterConfig, PosterTheme, PosterFont } from '../types';
 import { fetchSongDetail } from '../services/api';
 import { PosterPreview } from './PosterPreview';
@@ -234,47 +235,75 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
   const [exportCoverDataUrl, setExportCoverDataUrl] = useState<string | null>(null);
 
-  // Helper to generate clean image with customizable sampling multiplier (2x to 8x)
-  const generatePosterImage = async (targetPixelRatio = 4) => {
+  // Helper to generate a pixel-perfect local DOM screenshot matching the exact on-screen preview
+  const generatePosterImage = async (targetPixelRatio = 4): Promise<string> => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
-    const width = node.offsetWidth;
-    const height = node.offsetHeight;
+    // 1. Wait for document fonts to load completely
+    if (document.fonts && document.fonts.ready) {
+      try {
+        await document.fonts.ready;
+      } catch (e) {}
+    }
 
-      const clampedRatio = Math.min(8, Math.max(2, targetPixelRatio));
+    // 2. Wait for image element inside the poster to be fully rendered
+    const imgEls = Array.from(node.querySelectorAll('img')) as HTMLImageElement[];
+    await Promise.all(
+      imgEls.map((img) => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve(true);
+        return new Promise((resolve) => {
+          img.onload = () => resolve(true);
+          img.onerror = () => resolve(false);
+          setTimeout(() => resolve(false), 1200);
+        });
+      })
+    );
 
-      // Try target down through progressive fallback levels
-      const ratiosToTry = [clampedRatio, 6, 4, 3, 2].filter(
-        (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
-      );
+    const clampedRatio = Math.min(6, Math.max(2, targetPixelRatio));
+    const ratiosToTry = [clampedRatio, 3, 2].filter(
+      (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
+    );
 
-      for (const ratio of ratiosToTry) {
-        try {
-          const dataUrl = await toPng(node, {
-            quality: 0.98,
-            pixelRatio: ratio,
-            cacheBust: true, // Prevent html-to-image from caching the first rendered image
-            skipFonts: true,
-            imagePlaceholder: generateVinylCoverSvg(song.name, song.artist),
-            width,
-            height,
-            canvasWidth: width * ratio,
-            canvasHeight: height * ratio,
-            style: {
-              margin: '0',
-              transform: 'none',
-              left: '0',
-              top: '0',
-              position: 'static',
-            },
-          });
-          if (dataUrl) return dataUrl;
-        } catch (e) {
-          console.warn(`Export attempt with pixelRatio=${ratio} failed, trying next resolution level...`, e);
+    // Primary Engine: html2canvas (true DOM snapshot/screenshot)
+    for (const ratio of ratiosToTry) {
+      try {
+        const canvas = await html2canvas(node, {
+          scale: ratio,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: null,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: (_clonedDoc, clonedElement) => {
+            clonedElement.style.transform = 'none';
+            clonedElement.style.margin = '0';
+          },
+        });
+        const dataUrl = canvas.toDataURL('image/png', 1.0);
+        if (dataUrl && dataUrl.startsWith('data:image/png')) {
+          return dataUrl;
         }
+      } catch (e) {
+        console.warn(`html2canvas screenshot attempt with scale=${ratio} failed:`, e);
       }
-      throw new Error('Failed to generate image across all resolution attempts');
+    }
+
+    // Secondary Engine: html-to-image fallback
+    try {
+      const dataUrl = await toPng(node, {
+        quality: 0.98,
+        pixelRatio: clampedRatio,
+        cacheBust: false,
+        skipFonts: false,
+      });
+      if (dataUrl) return dataUrl;
+    } catch (e) {
+      console.warn('html-to-image fallback also failed:', e);
+    }
+
+    throw new Error('Failed to generate image across all screenshot attempts');
   };
 
   // Export Poster as PNG image
@@ -282,24 +311,8 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     if (!posterRef.current) return;
     setIsExporting(true);
 
-    // Preload current song's cover as a clean base64 data URL for html-to-image export
-    const currentCoverUrl = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
-    if (currentCoverUrl && !currentCoverUrl.startsWith('data:')) {
-      try {
-        const base64 = await urlToBase64(currentCoverUrl);
-        if (base64 && base64.startsWith('data:image/')) {
-          setExportCoverDataUrl(base64);
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        }
-      } catch (e) {
-        console.warn('Pre-export cover conversion skipped:', e);
-      }
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-
     try {
-      const targetRatio = scaleRatio || Number(exportScale) || 4;
+      const targetRatio = scaleRatio || Number(exportScale) || 3;
       const dataUrl = await generatePosterImage(targetRatio);
       const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
@@ -341,16 +354,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         }
       } catch (finalErr) {
         console.error('Fallback export also failed:', finalErr);
-        // Fallback: try capturing canvas at current DOM scale
-        try {
-          const node = posterRef.current;
-          if (node) {
-            const fallbackDataUrl = await toPng(node, { quality: 0.95, pixelRatio: 1 });
-            setExportModalType(null);
-            setExportedResultDataUrl(fallbackDataUrl);
-            return;
-          }
-        } catch {}
         alert('海报制作失败，请重试');
       }
     } finally {
@@ -364,24 +367,8 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     if (!posterRef.current) return;
     setIsExporting(true);
 
-    // Preload current song's cover as a clean base64 data URL for html-to-image export
-    const currentCoverUrl = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
-    if (currentCoverUrl && !currentCoverUrl.startsWith('data:')) {
-      try {
-        const base64 = await urlToBase64(currentCoverUrl);
-        if (base64 && base64.startsWith('data:image/')) {
-          setExportCoverDataUrl(base64);
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        }
-      } catch (e) {
-        console.warn('Pre-export cover conversion skipped:', e);
-      }
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-
     try {
-      const targetRatio = scaleRatio || Number(exportScale) || 4;
+      const targetRatio = scaleRatio || Number(exportScale) || 3;
       const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
       const dataUrl = await generatePosterImage(targetRatio);
@@ -414,7 +401,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     } catch (err) {
       console.error('Copy poster failed, falling back to result preview:', err);
       try {
-        const targetRatio = scaleRatio || Number(exportScale) || 4;
+        const targetRatio = scaleRatio || Number(exportScale) || 3;
         const dataUrl = await generatePosterImage(targetRatio);
         setExportModalType(null);
         setExportedResultDataUrl(dataUrl);
