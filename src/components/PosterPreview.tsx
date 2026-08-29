@@ -272,25 +272,19 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
           >
             {cleanSongName}
           </h4>
-          <div
-            className={`text-[11px] opacity-75 mt-0.5 w-full flex flex-wrap items-center leading-relaxed ${
+          <p
+            className={`text-[11px] opacity-75 mt-0.5 w-full truncate whitespace-nowrap leading-relaxed ${
               config.infoItalic ? 'italic' : 'not-italic'
-            } ${
-              infoAlign === 'center'
-                ? 'justify-center'
-                : infoAlign === 'right'
-                ? 'justify-end'
-                : 'justify-start'
             }`}
           >
-            <span className="break-words">{cleanArtist}</span>
+            <span>{cleanArtist}</span>
             {config.showAlbumInfo && song.album && (
               <>
-                <span className="mx-1.5 opacity-60 select-none">·</span>
-                <span className="break-words">{cleanAlbum}</span>
+                <span className="mx-0.5 opacity-60 select-none">・</span>
+                <span>{cleanAlbum}</span>
               </>
             )}
-          </div>
+          </p>
         </div>
       </div>
     </div>

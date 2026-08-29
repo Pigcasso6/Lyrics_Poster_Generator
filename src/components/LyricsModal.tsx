@@ -240,7 +240,9 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     const raw = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
     if (!raw || raw.startsWith('data:')) return;
     try {
-      const b64 = await urlToBase64(raw);
+      const b64Promise = urlToBase64(raw);
+      const timeoutPromise = new Promise<string>((resolve) => setTimeout(() => resolve(''), 2000));
+      const b64 = await Promise.race([b64Promise, timeoutPromise]);
       if (b64 && b64.startsWith('data:image/')) {
         setExportCoverDataUrl(b64);
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -255,10 +257,17 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
-    // 1. Wait for document fonts to load completely
+    const isMobile =
+      typeof window !== 'undefined' &&
+      (window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0));
+
+    // 1. Wait for document fonts to load completely (with safety timeout so mobile never hangs)
     if (document.fonts && document.fonts.ready) {
       try {
-        await document.fonts.ready;
+        await Promise.race([
+          document.fonts.ready,
+          new Promise((resolve) => setTimeout(resolve, 400)),
+        ]);
       } catch (e) {}
     }
 
@@ -270,20 +279,22 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         return new Promise((resolve) => {
           img.onload = () => resolve(true);
           img.onerror = () => resolve(false);
-          setTimeout(() => resolve(false), 800);
+          setTimeout(() => resolve(false), 500);
         });
       })
     );
 
-    const clampedRatio = Math.min(4, Math.max(1.5, targetPixelRatio));
-    const ratiosToTry = [clampedRatio, 2, 1.5].filter(
+    // On mobile devices, clamp pixel ratio to 3 to prevent canvas memory limits / WebKit crashes
+    const maxRatio = isMobile ? 3 : 8;
+    const clampedRatio = Math.min(maxRatio, Math.max(1.5, targetPixelRatio));
+    const ratiosToTry = [clampedRatio, isMobile ? 2 : 3, 2, 1.5].filter(
       (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
     );
 
-    // Primary Engine: html2canvas (true DOM snapshot/screenshot)
+    // Primary Engine: html2canvas (true DOM snapshot/screenshot with timeout guard)
     for (const ratio of ratiosToTry) {
       try {
-        const canvas = await html2canvas(node, {
+        const canvasPromise = html2canvas(node, {
           scale: ratio,
           useCORS: true,
           allowTaint: false,
@@ -296,6 +307,12 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
             clonedElement.style.margin = '0';
           },
         });
+
+        const timeoutPromise = new Promise<HTMLCanvasElement>((_, reject) =>
+          setTimeout(() => reject(new Error('html2canvas render timeout')), 4500)
+        );
+
+        const canvas = await Promise.race([canvasPromise, timeoutPromise]);
         const dataUrl = canvas.toDataURL('image/png', 1.0);
         if (dataUrl && dataUrl.startsWith('data:image/png') && dataUrl.length > 500) {
           return dataUrl;
@@ -307,12 +324,19 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
     // Secondary Engine: html-to-image fallback
     try {
-      const dataUrl = await toPng(node, {
+      const fallbackRatio = isMobile ? Math.min(2.5, clampedRatio) : clampedRatio;
+      const dataUrlPromise = toPng(node, {
         quality: 0.98,
-        pixelRatio: clampedRatio,
+        pixelRatio: fallbackRatio,
         cacheBust: false,
         skipFonts: true,
       });
+
+      const timeoutPromise = new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error('html-to-image render timeout')), 4500)
+      );
+
+      const dataUrl = await Promise.race([dataUrlPromise, timeoutPromise]);
       if (dataUrl && dataUrl.startsWith('data:image/')) return dataUrl;
     } catch (e) {
       console.warn('html-to-image fallback failed:', e);
@@ -485,7 +509,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
                 <span className="shrink-0 max-w-[50%] sm:max-w-[60%] truncate">{cleanArtistName(song.artist)}</span>
                 {song.album && (
                   <>
-                    <span className="shrink-0 mx-1.5 text-slate-500 select-none">·</span>
+                    <span className="shrink-0 mx-1 text-slate-500 select-none">・</span>
                     <span className="truncate shrink min-w-0">{cleanAlbumName(song.album)}</span>
                   </>
                 )}
@@ -1501,7 +1525,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
                 <span className="truncate max-w-[45%]">{cleanArtistName(song.artist)}</span>
                 {song.album && (
                   <>
-                    <span className="shrink-0 mx-1.5 opacity-60 select-none">·</span>
+                    <span className="shrink-0 mx-1 opacity-60 select-none">・</span>
                     <span className="truncate max-w-[45%]">{cleanAlbumName(song.album)}</span>
                   </>
                 )}

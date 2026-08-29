@@ -11,8 +11,11 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
 
   // 1. Try our server proxy first (handles CORS & referer headers)
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
     const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
-    const res = await fetch(proxyUrl);
+    const res = await fetch(proxyUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     
     // CRITICAL: MUST verify that response is 200 OK AND content-type is an image, NOT text/html or application/json!
@@ -45,7 +48,10 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
 
   for (const mirrorUrl of mirrorUrls) {
     try {
-      const res = await fetch(mirrorUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(mirrorUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
       if (res.ok && (contentType.startsWith('image/') || contentType.includes('octet-stream'))) {
         const blob = await res.blob();
