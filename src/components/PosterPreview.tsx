@@ -24,6 +24,7 @@ interface PosterPreviewProps {
   config: PosterConfig;
   previewRef?: React.RefObject<HTMLDivElement | null>;
   customCoverUrl?: string;
+  exportCoverUrl?: string | null;
 }
 
 export const PosterPreview: React.FC<PosterPreviewProps> = ({
@@ -32,6 +33,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   config,
   previewRef,
   customCoverUrl,
+  exportCoverUrl,
 }) => {
   // Fixed width styling for high-definition render (380px nominal width)
   const aspectStyles: Record<string, string> = {
@@ -89,7 +91,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
     }
   };
 
-  const [imgErrorCount, setImgErrorCount] = React.useState(0);
+  const [imgError, setImgError] = React.useState(false);
 
   const cleanSongName = cleanPosterSongTitle(song.name);
   const cleanArtist = cleanArtistName(song.artist);
@@ -98,21 +100,13 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
   const rawCover = (customCoverUrl || song.albumCover || '').replace(/^http:\/\//i, 'https://');
 
   React.useEffect(() => {
-    setImgErrorCount(0);
-  }, [rawCover]);
+    setImgError(false);
+  }, [rawCover, song.id]);
 
   let coverImageSrc = rawCover;
-  if (rawCover && !rawCover.startsWith('data:') && !rawCover.startsWith('blob:')) {
-    if (imgErrorCount === 0) {
-      coverImageSrc = rawCover;
-    } else if (imgErrorCount === 1) {
-      coverImageSrc = `/api/music/proxy-image?url=${encodeURIComponent(rawCover)}`;
-    } else if (imgErrorCount === 2) {
-      coverImageSrc = `https://wsrv.nl/?url=${encodeURIComponent(rawCover)}&output=webp`;
-    } else {
-      coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
-    }
-  } else if (!rawCover || imgErrorCount > 2) {
+  if (exportCoverUrl && exportCoverUrl.startsWith('data:image/')) {
+    coverImageSrc = exportCoverUrl;
+  } else if (imgError || !rawCover) {
     coverImageSrc = generateVinylCoverSvg(cleanSongName, cleanArtist);
   }
 
@@ -153,10 +147,9 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
             <img
               src={coverImageSrc}
               alt={cleanSongName}
-              crossOrigin="anonymous"
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover block"
-              onError={() => setImgErrorCount(c => c + 1)}
+              onError={() => setImgError(true)}
             />
           </div>
         </div>
@@ -251,7 +244,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
           style={infoFontStyle}
         >
           <h4
-            className={`tracking-tight  w-full ${
+            className={`tracking-tight w-full break-words ${
               config.infoBold ? 'font-bold' : 'font-normal'
             } ${config.infoItalic ? 'italic' : 'not-italic'} ${
               config.fontSize === 'xl' ? 'text-sm' : 'text-xs'
@@ -260,7 +253,7 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
             {cleanSongName}
           </h4>
           <div
-            className={`text-[11px] opacity-75 mt-0.5 w-full flex items-center overflow-hidden ${
+            className={`text-[11px] opacity-75 mt-0.5 w-full flex flex-wrap items-center leading-relaxed ${
               config.infoItalic ? 'italic' : 'not-italic'
             } ${
               infoAlign === 'center'
@@ -270,11 +263,11 @@ export const PosterPreview: React.FC<PosterPreviewProps> = ({
                 : 'justify-start'
             }`}
           >
-            <span className="shrink-0 max-w-[50%] sm:max-w-[60%] ">{cleanArtist}</span>
+            <span className="break-words">{cleanArtist}</span>
             {config.showAlbumInfo && song.album && (
               <>
-                <span className="shrink-0 mx-1.5 opacity-60 select-none">·</span>
-                <span className=" shrink min-w-0">{cleanAlbum}</span>
+                <span className="mx-1.5 opacity-60 select-none">·</span>
+                <span className="break-words">{cleanAlbum}</span>
               </>
             )}
           </div>

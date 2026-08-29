@@ -80,6 +80,7 @@ export default function App() {
       {/* Full Lyrics & Poster Studio Modal */}
       {isModalOpen && selectedSong && (
         <LyricsModal
+          key={`${selectedSong.platform}-${selectedSong.id}`}
           song={selectedSong}
           onClose={() => setIsModalOpen(false)}
         />

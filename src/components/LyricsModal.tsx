@@ -130,6 +130,8 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setLoading(true);
     setSelectedLines([]);
     setCustomQuoteInput('');
+    setExportCoverDataUrl(null);
+    setExportedResultDataUrl(null);
 
     const fetchLyrics = async () => {
       try {
@@ -279,9 +281,22 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const handleDownloadPoster = async (scaleRatio?: number) => {
     if (!posterRef.current) return;
     setIsExporting(true);
-    
-    // Give React time to re-render the DOM with isExporting=true (switching to safe fallback image)
-    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    // Preload current song's cover as a clean base64 data URL for html-to-image export
+    const currentCoverUrl = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
+    if (currentCoverUrl && !currentCoverUrl.startsWith('data:')) {
+      try {
+        const base64 = await urlToBase64(currentCoverUrl);
+        if (base64 && base64.startsWith('data:image/')) {
+          setExportCoverDataUrl(base64);
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+      } catch (e) {
+        console.warn('Pre-export cover conversion skipped:', e);
+      }
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
 
     try {
       const targetRatio = scaleRatio || Number(exportScale) || 4;
@@ -340,6 +355,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
       }
     } finally {
       setIsExporting(false);
+      setExportCoverDataUrl(null);
     }
   };
 
@@ -347,9 +363,22 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
   const handleCopyImage = async (scaleRatio?: number) => {
     if (!posterRef.current) return;
     setIsExporting(true);
-    
-    // Give React time to re-render the DOM with isExporting=true (switching to safe fallback image)
-    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    // Preload current song's cover as a clean base64 data URL for html-to-image export
+    const currentCoverUrl = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
+    if (currentCoverUrl && !currentCoverUrl.startsWith('data:')) {
+      try {
+        const base64 = await urlToBase64(currentCoverUrl);
+        if (base64 && base64.startsWith('data:image/')) {
+          setExportCoverDataUrl(base64);
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+      } catch (e) {
+        console.warn('Pre-export cover conversion skipped:', e);
+      }
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
 
     try {
       const targetRatio = scaleRatio || Number(exportScale) || 4;
@@ -394,6 +423,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
       }
     } finally {
       setIsExporting(false);
+      setExportCoverDataUrl(null);
     }
   };
 
@@ -596,6 +626,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
               config={posterConfig}
               previewRef={posterRef}
               customCoverUrl={song.albumCover}
+              exportCoverUrl={exportCoverDataUrl}
             />
           </div>
         </div>

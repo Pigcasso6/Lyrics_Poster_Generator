@@ -6,24 +6,31 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
   if (!imageUrl) return '';
   if (imageUrl.startsWith('data:')) return imageUrl;
 
+  const cleanUrl = imageUrl.replace(/^http:\/\//i, 'https://');
+
   // 1. Try our server proxy first (handles CORS & referer headers)
   try {
-    const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(imageUrl)}`;
+    const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
     const res = await fetch(proxyUrl);
     if (res.ok) {
-      const blob = await res.blob();
-      return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            resolve(reader.result);
-          } else {
-            reject(new Error('FileReader result is not a string'));
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.startsWith('image/')) {
+        const blob = await res.blob();
+        if (blob.size > 100) {
+          return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+                resolve(reader.result);
+              } else {
+                reject(new Error('FileReader result is not a valid image'));
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
     }
   } catch (err) {
     console.warn('Server image proxy failed, falling back to direct canvas load:', err);
@@ -31,7 +38,6 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
 
   // 2. Direct browser Image + Canvas conversion fallback
   try {
-    const secureUrl = imageUrl.startsWith('http://') ? imageUrl.replace('http://', 'https://') : imageUrl;
     return await new Promise<string>((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -45,18 +51,20 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
           if (ctx) {
             ctx.drawImage(img, 0, 0);
             const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-            resolve(dataUrl);
-            return;
+            if (dataUrl.startsWith('data:image/')) {
+              resolve(dataUrl);
+              return;
+            }
           }
         } catch (e) {
           console.warn('Canvas export tainted:', e);
         }
-        resolve(imageUrl);
+        resolve('');
       };
-      img.onerror = () => resolve(imageUrl);
-      img.src = secureUrl;
+      img.onerror = () => resolve('');
+      img.src = cleanUrl;
     });
   } catch {
-    return imageUrl;
+    return '';
   }
 }
