@@ -13,27 +13,24 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
     const proxyUrl = `/api/music/proxy-image?url=${encodeURIComponent(cleanUrl)}`;
     const res = await fetch(proxyUrl);
     if (res.ok) {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.startsWith('image/')) {
-        const blob = await res.blob();
-        if (blob.size > 100) {
-          return await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
-                resolve(reader.result);
-              } else {
-                reject(new Error('FileReader result is not a valid image'));
-              }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }
+      const blob = await res.blob();
+      if (blob && blob.size > 50) {
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
+              resolve(reader.result);
+            } else {
+              reject(new Error('FileReader result is not a valid data URL'));
+            }
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
     }
   } catch (err) {
-    console.warn('Server image proxy failed, falling back to direct canvas load:', err);
+    console.warn('Server image proxy failed, trying canvas fallback:', err);
   }
 
   // 2. Direct browser Image + Canvas conversion fallback
@@ -51,7 +48,7 @@ export async function urlToBase64(imageUrl: string): Promise<string> {
           if (ctx) {
             ctx.drawImage(img, 0, 0);
             const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-            if (dataUrl.startsWith('data:image/')) {
+            if (dataUrl && dataUrl.startsWith('data:image/')) {
               resolve(dataUrl);
               return;
             }

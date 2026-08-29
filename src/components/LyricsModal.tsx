@@ -235,8 +235,23 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
 
   const [exportCoverDataUrl, setExportCoverDataUrl] = useState<string | null>(null);
 
+  // Helper to ensure cover image is ready in base64 before taking the screenshot
+  const ensureCoverBase64 = async () => {
+    const raw = (song.albumCover || '').replace(/^http:\/\//i, 'https://');
+    if (!raw || raw.startsWith('data:')) return;
+    try {
+      const b64 = await urlToBase64(raw);
+      if (b64 && b64.startsWith('data:')) {
+        setExportCoverDataUrl(b64);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+    } catch (e) {
+      console.warn('Pre-export base64 conversion notice:', e);
+    }
+  };
+
   // Helper to generate a pixel-perfect local DOM screenshot matching the exact on-screen preview
-  const generatePosterImage = async (targetPixelRatio = 4): Promise<string> => {
+  const generatePosterImage = async (targetPixelRatio = 3): Promise<string> => {
     const node = posterRef.current;
     if (!node) throw new Error('Canvas element not found');
 
@@ -255,13 +270,13 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         return new Promise((resolve) => {
           img.onload = () => resolve(true);
           img.onerror = () => resolve(false);
-          setTimeout(() => resolve(false), 1200);
+          setTimeout(() => resolve(false), 800);
         });
       })
     );
 
-    const clampedRatio = Math.min(6, Math.max(2, targetPixelRatio));
-    const ratiosToTry = [clampedRatio, 3, 2].filter(
+    const clampedRatio = Math.min(4, Math.max(1.5, targetPixelRatio));
+    const ratiosToTry = [clampedRatio, 2, 1.5].filter(
       (r, idx, arr) => arr.indexOf(r) === idx && r <= clampedRatio
     );
 
@@ -271,7 +286,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         const canvas = await html2canvas(node, {
           scale: ratio,
           useCORS: true,
-          allowTaint: true,
+          allowTaint: false,
           backgroundColor: null,
           logging: false,
           scrollX: 0,
@@ -282,7 +297,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
           },
         });
         const dataUrl = canvas.toDataURL('image/png', 1.0);
-        if (dataUrl && dataUrl.startsWith('data:image/png')) {
+        if (dataUrl && dataUrl.startsWith('data:image/png') && dataUrl.length > 500) {
           return dataUrl;
         }
       } catch (e) {
@@ -296,11 +311,11 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
         quality: 0.98,
         pixelRatio: clampedRatio,
         cacheBust: false,
-        skipFonts: false,
+        skipFonts: true,
       });
-      if (dataUrl) return dataUrl;
+      if (dataUrl && dataUrl.startsWith('data:image/')) return dataUrl;
     } catch (e) {
-      console.warn('html-to-image fallback also failed:', e);
+      console.warn('html-to-image fallback failed:', e);
     }
 
     throw new Error('Failed to generate image across all screenshot attempts');
@@ -312,6 +327,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setIsExporting(true);
 
     try {
+      await ensureCoverBase64();
       const targetRatio = scaleRatio || Number(exportScale) || 3;
       const dataUrl = await generatePosterImage(targetRatio);
       const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
@@ -368,6 +384,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     setIsExporting(true);
 
     try {
+      await ensureCoverBase64();
       const targetRatio = scaleRatio || Number(exportScale) || 3;
       const isMobile = window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
