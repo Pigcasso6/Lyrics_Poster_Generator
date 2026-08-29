@@ -241,7 +241,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({ song, onClose }) => {
     if (!raw || raw.startsWith('data:')) return;
     try {
       const b64 = await urlToBase64(raw);
-      if (b64 && b64.startsWith('data:')) {
+      if (b64 && b64.startsWith('data:image/')) {
         setExportCoverDataUrl(b64);
         await new Promise((resolve) => setTimeout(resolve, 80));
       }
